@@ -60,6 +60,10 @@ fn main() -> anyhow::Result<()> {
     let result = match cli.command {
         Commands::Doctor(args) => commands::doctor::cmd_doctor(args, cli.json, &cwd),
         Commands::Info(args) => commands::info::cmd_info(args, cli.json, &config, &cwd),
+        Commands::Preflight(args) => {
+            commands::preflight::cmd_preflight(args, cli.json, &config, &cwd)
+        }
+        Commands::Bump(args) => commands::bump::cmd_bump(args, cli.json, &config, &cwd),
     };
     if let Err(ref err) = result {
         tracing::error!(error = %err, "fatal error");

@@ -66,7 +66,17 @@ log_level: info
 # release:
 #   changelog_tool: git-cliff   # or cog
 #   github_release: true
-#   postcard: false             # opt-in, requires ll-graphics + resvg
-#   notes:
-#     template: templates/release-notes.tera
-#     quote_corpus: corpus/quotes.jsonl
+#   assets:
+#     - release-card.png
+#     - checksums.txt
+
+# ------------------------------------------------------------------------------
+# Hooks (cog-style pre/post commands per phase)
+# ------------------------------------------------------------------------------
+# Variables: {version}, {prev_version}, {tag}, {changelog_path}, {owner}, {repo}
+
+# hooks:
+#   post_bump:
+#     - "ll-graphics generate --version {version} --output release-card.png"
+#   pre_publish:
+#     - "cargo build --release"
