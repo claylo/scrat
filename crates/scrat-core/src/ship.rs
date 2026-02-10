@@ -27,6 +27,7 @@ use crate::config::Config;
 use crate::ecosystem::ProjectDetection;
 use crate::git;
 use crate::hooks::{self, HookContext};
+use crate::pipeline::{PipelineContext, PipelineContextInit};
 use crate::preflight;
 
 // ──────────────────────────────────────────────
@@ -188,6 +189,8 @@ pub struct ShipOutcome {
     pub hooks_run: usize,
     /// Whether this was a dry run.
     pub dry_run: bool,
+    /// Structured pipeline context with data from all phases.
+    pub context: PipelineContext,
 }
 
 // ──────────────────────────────────────────────
@@ -315,10 +318,38 @@ impl ReadyShip {
         let previous = &self.bump.previous;
         let tag = format!("v{version}");
 
-        // Build the hook context
-        let hook_ctx = build_hook_context(version, previous, &tag, project_root);
+        // Build the pipeline context — accumulates structured data across phases
+        let (owner, repo, repo_url) = {
+            let remote = git::remote_url("origin").ok().flatten();
+            let (o, r) = remote
+                .as_deref()
+                .and_then(git::parse_owner_repo)
+                .unwrap_or_else(|| ("unknown".into(), "unknown".into()));
+            (o, r, remote)
+        };
 
-        // Helper: run hooks if they exist (skipped in dry-run mode)
+        let mut ctx = PipelineContext::new(PipelineContextInit {
+            version: version.to_string(),
+            previous_version: previous.to_string(),
+            tag: tag.clone(),
+            previous_tag: format!("v{previous}"),
+            owner,
+            repo,
+            repo_url,
+            branch: git::current_branch().ok().flatten(),
+            ecosystem: self.detection.ecosystem.to_string(),
+            changelog_path: project_root.join("CHANGELOG.md").to_string(),
+            dry_run: is_dry,
+        });
+
+        // Load release assets from config
+        if let Some(assets) = self.config.release.as_ref().and_then(|r| r.assets.clone()) {
+            ctx.set_assets(assets);
+        }
+
+        // Derive hook interpolation context
+        let hook_ctx = ctx.hook_context();
+
         let hooks_config = self.config.hooks.as_ref();
 
         // ── Preflight (already passed in plan phase) ──
@@ -419,6 +450,7 @@ impl ReadyShip {
                 .bump
                 .execute(project_root, !self.options.no_changelog)?;
             let files = result.modified_files.join(", ");
+            ctx.record_bump(result.changelog_updated, result.modified_files);
             PhaseOutcome::Success {
                 message: format!(
                     "Bumped to {version}{changelog} (modified: {files})",
@@ -510,7 +542,14 @@ impl ReadyShip {
                 message: format!("Would commit, tag {tag}{push_msg}"),
             }
         } else {
-            run_git_phase(project_root, &tag, version, self.options.no_push)?
+            let git_result = run_git_phase(project_root, &tag, version, self.options.no_push)?;
+            ctx.record_git(Some(git_result.hash.clone()), git_result.branch.clone());
+            let msg = if git_result.pushed {
+                format!("Committed {}, tagged {tag}, pushed", git_result.hash)
+            } else {
+                format!("Committed {}, tagged {tag} (push skipped)", git_result.hash)
+            };
+            PhaseOutcome::Success { message: msg }
         };
         on_event(ShipEvent::PhaseCompleted(
             ShipPhase::Git,
@@ -560,7 +599,13 @@ impl ReadyShip {
                     .as_ref()
                     .and_then(|r| r.assets.as_deref())
                     .unwrap_or(&[]);
-                run_release_phase(project_root, &tag, assets)?
+                let release_result = run_release_phase(project_root, &tag, assets)?;
+                ctx.record_release(release_result.url.clone());
+                let msg = release_result.url.as_ref().map_or_else(
+                    || format!("Created GitHub release {tag}"),
+                    |url| format!("Created GitHub release: {url}"),
+                );
+                PhaseOutcome::Success { message: msg }
             } else {
                 PhaseOutcome::Skipped {
                     reason: "github_release = false in config".into(),
@@ -599,6 +644,7 @@ impl ReadyShip {
             phases,
             hooks_run,
             dry_run: is_dry,
+            context: ctx,
         };
 
         info!(
@@ -653,31 +699,6 @@ fn run_phase_hooks(
 
     on_event(ShipEvent::HooksCompleted { phase, count });
     Ok(count)
-}
-
-/// Build the hook context from resolved values.
-fn build_hook_context(
-    version: &Version,
-    previous: &Version,
-    tag: &str,
-    project_root: &Utf8Path,
-) -> HookContext {
-    let (owner, repo) = git::remote_url("origin")
-        .ok()
-        .flatten()
-        .and_then(|url| git::parse_owner_repo(&url))
-        .unwrap_or_else(|| ("unknown".into(), "unknown".into()));
-
-    let changelog_path = project_root.join("CHANGELOG.md").to_string();
-
-    HookContext {
-        version: version.to_string(),
-        prev_version: previous.to_string(),
-        tag: tag.to_string(),
-        changelog_path,
-        owner,
-        repo,
-    }
 }
 
 /// Run the test phase by executing the configured or detected test command.
@@ -758,13 +779,23 @@ fn run_publish_phase(
     })
 }
 
+/// Structured result from the git phase.
+struct GitPhaseResult {
+    /// The commit hash.
+    hash: String,
+    /// The branch that was pushed (if any).
+    branch: Option<String>,
+    /// Whether the push actually happened.
+    pushed: bool,
+}
+
 /// Run the git phase: commit, tag, and optionally push.
 fn run_git_phase(
     _project_root: &Utf8Path,
     tag: &str,
     version: &Version,
     no_push: bool,
-) -> ShipResult<PhaseOutcome> {
+) -> ShipResult<GitPhaseResult> {
     // Stage and commit all modified files
     let commit_msg = format!("chore: release {version}");
     let hash = git::commit(&["."], &commit_msg)?;
@@ -777,14 +808,24 @@ fn run_git_phase(
     if !no_push {
         let branch = git::current_branch()?.unwrap_or_else(|| "HEAD".into());
         git::push("origin", &branch, true)?;
-        Ok(PhaseOutcome::Success {
-            message: format!("Committed {hash}, tagged {tag}, pushed"),
+        Ok(GitPhaseResult {
+            hash,
+            branch: Some(branch),
+            pushed: true,
         })
     } else {
-        Ok(PhaseOutcome::Success {
-            message: format!("Committed {hash}, tagged {tag} (push skipped)"),
+        Ok(GitPhaseResult {
+            hash,
+            branch: None,
+            pushed: false,
         })
     }
+}
+
+/// Structured result from the release phase.
+struct ReleasePhaseResult {
+    /// The URL of the created release (None if `gh` didn't output one).
+    url: Option<String>,
 }
 
 /// Create a GitHub release using `gh release create`.
@@ -792,7 +833,7 @@ fn run_release_phase(
     project_root: &Utf8Path,
     tag: &str,
     assets: &[String],
-) -> ShipResult<PhaseOutcome> {
+) -> ShipResult<ReleasePhaseResult> {
     let mut args = vec![
         "release".to_string(),
         "create".to_string(),
@@ -824,14 +865,13 @@ fn run_release_phase(
         });
     }
 
-    let url = String::from_utf8_lossy(&output.stdout).trim().to_string();
-    Ok(PhaseOutcome::Success {
-        message: if url.is_empty() {
-            format!("Created GitHub release {tag}")
-        } else {
-            format!("Created GitHub release: {url}")
-        },
-    })
+    let raw_url = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    let url = if raw_url.is_empty() {
+        None
+    } else {
+        Some(raw_url)
+    };
+    Ok(ReleasePhaseResult { url })
 }
 
 #[cfg(test)]
@@ -877,6 +917,19 @@ mod tests {
 
     #[test]
     fn ship_outcome_serializes() {
+        let ctx = PipelineContext::new(PipelineContextInit {
+            version: "1.2.3".into(),
+            previous_version: "1.1.0".into(),
+            tag: "v1.2.3".into(),
+            previous_tag: "v1.1.0".into(),
+            owner: "claylo".into(),
+            repo: "scrat".into(),
+            repo_url: None,
+            branch: Some("main".into()),
+            ecosystem: "rust".into(),
+            changelog_path: "CHANGELOG.md".into(),
+            dry_run: false,
+        });
         let outcome = ShipOutcome {
             version: Version::new(1, 2, 3),
             previous_version: Version::new(1, 1, 0),
@@ -889,11 +942,14 @@ mod tests {
             )],
             hooks_run: 2,
             dry_run: false,
+            context: ctx,
         };
         let json = serde_json::to_string_pretty(&outcome).unwrap();
         assert!(json.contains("\"tag\": \"v1.2.3\""));
         assert!(json.contains("\"hooks_run\": 2"));
         assert!(json.contains("\"dry_run\": false"));
+        assert!(json.contains("\"context\""));
+        assert!(json.contains("\"ecosystem\": \"rust\""));
     }
 
     #[test]
@@ -909,19 +965,26 @@ mod tests {
     }
 
     #[test]
-    fn build_hook_context_structure() {
-        let ctx = build_hook_context(
-            &Version::new(1, 2, 3),
-            &Version::new(1, 1, 0),
-            "v1.2.3",
-            Utf8Path::new("/tmp/project"),
-        );
-        assert_eq!(ctx.version, "1.2.3");
-        assert_eq!(ctx.prev_version, "1.1.0");
-        assert_eq!(ctx.tag, "v1.2.3");
-        assert_eq!(ctx.changelog_path, "/tmp/project/CHANGELOG.md");
-        // owner/repo depend on actual git state, so just check they're non-empty
-        assert!(!ctx.owner.is_empty());
-        assert!(!ctx.repo.is_empty());
+    fn pipeline_context_derives_hook_context() {
+        let ctx = PipelineContext::new(PipelineContextInit {
+            version: "1.2.3".into(),
+            previous_version: "1.1.0".into(),
+            tag: "v1.2.3".into(),
+            previous_tag: "v1.1.0".into(),
+            owner: "claylo".into(),
+            repo: "scrat".into(),
+            repo_url: None,
+            branch: None,
+            ecosystem: "rust".into(),
+            changelog_path: "/tmp/project/CHANGELOG.md".into(),
+            dry_run: false,
+        });
+        let hc = ctx.hook_context();
+        assert_eq!(hc.version, "1.2.3");
+        assert_eq!(hc.prev_version, "1.1.0");
+        assert_eq!(hc.tag, "v1.2.3");
+        assert_eq!(hc.changelog_path, "/tmp/project/CHANGELOG.md");
+        assert_eq!(hc.owner, "claylo");
+        assert_eq!(hc.repo, "scrat");
     }
 }

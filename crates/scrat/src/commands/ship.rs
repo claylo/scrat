@@ -110,11 +110,7 @@ pub fn cmd_ship(
 
     // Confirm before executing (unless dry-run, --yes, or config says no)
     if !is_dry && !global_json {
-        let config_confirm = config
-            .ship
-            .as_ref()
-            .and_then(|s| s.confirm)
-            .unwrap_or(true);
+        let config_confirm = config.ship.as_ref().and_then(|s| s.confirm).unwrap_or(true);
 
         if config_confirm && !skip_confirm {
             print_phase_summary(&ready.options, config);
@@ -288,7 +284,11 @@ fn print_phase_summary(options: &ShipOptions, config: &Config) {
         ("release", !options.no_release),
     ];
 
-    let active: Vec<&str> = phases.iter().filter(|(_, on)| *on).map(|(n, _)| *n).collect();
+    let active: Vec<&str> = phases
+        .iter()
+        .filter(|(_, on)| *on)
+        .map(|(n, _)| *n)
+        .collect();
     let skipped: Vec<&str> = phases
         .iter()
         .filter(|(_, on)| !*on)
@@ -297,10 +297,7 @@ fn print_phase_summary(options: &ShipOptions, config: &Config) {
 
     print!("  {}: {}", "Phases".dimmed(), active.join(", ").bold());
     if !skipped.is_empty() {
-        print!(
-            " {}",
-            format!("(skip: {})", skipped.join(", ")).dimmed()
-        );
+        print!(" {}", format!("(skip: {})", skipped.join(", ")).dimmed());
     }
     println!();
 

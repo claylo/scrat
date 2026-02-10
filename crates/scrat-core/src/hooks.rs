@@ -49,6 +49,9 @@ pub enum HookError {
 pub type HookResult<T> = Result<T, HookError>;
 
 /// Variables available for interpolation in hook commands.
+///
+/// Typically derived from [`PipelineContext::hook_context()`](crate::pipeline::PipelineContext::hook_context)
+/// during the ship workflow rather than constructed directly.
 #[derive(Debug, Clone)]
 pub struct HookContext {
     /// The new version being released (e.g., `1.2.3`).
