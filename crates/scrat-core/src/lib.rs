@@ -6,6 +6,8 @@
 //! # Modules
 //!
 //! - [`config`] - Configuration loading and management
+//! - [`detect`] - Project ecosystem and tool detection
+//! - [`ecosystem`] - Ecosystem types and smart defaults
 //! - [`error`] - Error types and result aliases
 //!
 //! # Quick Start
@@ -23,6 +25,10 @@
 #![deny(unsafe_code)]
 
 pub mod config;
+
+pub mod detect;
+
+pub mod ecosystem;
 
 pub mod error;
 

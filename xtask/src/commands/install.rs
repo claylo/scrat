@@ -42,10 +42,7 @@ pub fn cmd_install(args: InstallArgs) -> Result<(), String> {
 
 fn build_cli(root: &Path, profile: &str) -> Result<std::process::ExitStatus, String> {
     let mut cmd = Command::new("cargo");
-    cmd.arg("build")
-        .arg("-p")
-        .arg("scrat")
-        .current_dir(root);
+    cmd.arg("build").arg("-p").arg("scrat").current_dir(root);
     if profile == "release" {
         cmd.arg("--release");
     } else if profile == "dev" {

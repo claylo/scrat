@@ -25,7 +25,7 @@ struct Xtask {
 
 #[derive(Subcommand, Debug)]
 enum Task {
-/// Generate shell completions for the scrat CLI.
+    /// Generate shell completions for the scrat CLI.
     Completions(commands::completions::CompletionsArgs),
 
     /// Generate manpages for the scrat CLI.
@@ -38,7 +38,7 @@ enum Task {
 fn main() -> Result<(), String> {
     let task = Xtask::parse();
     match task.command {
-Task::Completions(args) => commands::completions::cmd_completions(args),
+        Task::Completions(args) => commands::completions::cmd_completions(args),
         Task::Man(args) => commands::man::cmd_man(args),
         Task::Install(args) => commands::install::cmd_install(args),
     }

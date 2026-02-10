@@ -37,12 +37,14 @@ use figment::Figment;
 use figment::providers::{Format, Json, Serialized, Toml, Yaml};
 use serde::{Deserialize, Serialize};
 
+use crate::ecosystem::{ChangelogTool, Ecosystem};
 use crate::error::{ConfigError, ConfigResult};
 
 /// The configuration for scrat.
 ///
-/// Add your configuration fields here. This struct is deserialized from
-/// config files found during discovery (TOML, YAML, or JSON).
+/// Deserialized from config files found during discovery (TOML, YAML, or JSON).
+/// All section fields are optional — auto-detection fills in smart defaults,
+/// and config values act as overrides.
 #[derive(Debug, Clone, Default, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(default)]
 pub struct Config {
@@ -50,6 +52,76 @@ pub struct Config {
     pub log_level: LogLevel,
     /// Directory for JSONL log files (falls back to platform defaults if unset).
     pub log_dir: Option<Utf8PathBuf>,
+    /// Project configuration overrides.
+    pub project: Option<ProjectConfig>,
+    /// Version strategy overrides.
+    pub version: Option<VersionConfig>,
+    /// Command overrides per workflow phase.
+    pub commands: Option<CommandsConfig>,
+    /// Release workflow configuration.
+    pub release: Option<ReleaseConfig>,
+}
+
+/// Project-level configuration overrides.
+///
+/// Normally auto-detected from marker files in the working directory.
+/// Use this section to override the detected values.
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
+pub struct ProjectConfig {
+    /// Override the detected ecosystem (e.g., `"rust"`, `"node"`).
+    #[serde(rename = "type")]
+    pub project_type: Option<Ecosystem>,
+    /// Override the release branch (default: auto-detect `main` or `master`).
+    pub release_branch: Option<String>,
+}
+
+/// Version strategy configuration.
+///
+/// Normally auto-detected from the presence of `cliff.toml` / `cog.toml`.
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
+pub struct VersionConfig {
+    /// Override the version strategy.
+    ///
+    /// Possible values: `"conventional-commits"`, `"interactive"`, `"explicit"`.
+    pub strategy: Option<String>,
+}
+
+/// Command overrides for each phase of the release workflow.
+///
+/// Each ecosystem provides smart defaults. Use this section to override
+/// any phase's command.
+#[derive(Debug, Clone, Default, Deserialize, Serialize, PartialEq, Eq)]
+pub struct CommandsConfig {
+    /// Override the test command (e.g., `"cargo nextest run"`).
+    pub test: Option<String>,
+    /// Override the build command (e.g., `"cargo build --release"`).
+    pub build: Option<String>,
+    /// Override the publish command (e.g., `"cargo publish"`).
+    pub publish: Option<String>,
+    /// Override the clean command.
+    pub clean: Option<String>,
+}
+
+/// Release workflow configuration.
+#[derive(Debug, Clone, Default, Deserialize, Serialize, PartialEq, Eq)]
+pub struct ReleaseConfig {
+    /// Override the changelog tool (`"git-cliff"` or `"cog"`).
+    pub changelog_tool: Option<ChangelogTool>,
+    /// Whether to create a GitHub release (default: `true`).
+    pub github_release: Option<bool>,
+    /// Whether to generate a release postcard image (default: `false`).
+    pub postcard: Option<bool>,
+    /// Release notes sub-configuration.
+    pub notes: Option<ReleaseNotesConfig>,
+}
+
+/// Release notes template configuration.
+#[derive(Debug, Clone, Default, Deserialize, Serialize, PartialEq, Eq)]
+pub struct ReleaseNotesConfig {
+    /// Path to a custom release notes template.
+    pub template: Option<Utf8PathBuf>,
+    /// Path to a quote corpus JSONL file.
+    pub quote_corpus: Option<Utf8PathBuf>,
 }
 
 /// Log level configuration.
@@ -181,7 +253,10 @@ impl ConfigLoader {
         let config: Config = figment
             .extract()
             .map_err(|e| ConfigError::Deserialize(Box::new(e)))?;
-        tracing::info!(log_level = config.log_level.as_str(), "configuration loaded");
+        tracing::info!(
+            log_level = config.log_level.as_str(),
+            "configuration loaded"
+        );
         Ok(config)
     }
 
@@ -328,7 +403,7 @@ mod tests {
         let config = Config::default();
         assert_eq!(config.log_level, LogLevel::Info);
         assert!(config.log_dir.is_none());
-}
+    }
 
     #[test]
     fn test_loader_builds_with_defaults() {
@@ -347,10 +422,10 @@ mod tests {
         let config_path = tmp.path().join("config.toml");
         fs::write(
             &config_path,
-r#"log_level = "debug"
+            r#"log_level = "debug"
 log_dir = "/tmp/scrat"
 "#,
-)
+        )
         .unwrap();
 
         // Convert to Utf8PathBuf for API call
@@ -367,7 +442,7 @@ log_dir = "/tmp/scrat"
             config.log_dir.as_ref().map(|dir| dir.as_str()),
             Some("/tmp/scrat")
         );
-}
+    }
 
     #[test]
     fn test_later_file_overrides_earlier() {
@@ -514,5 +589,123 @@ log_dir = "/tmp/scrat"
             assert!(path.as_str().contains("scrat"));
         }
     }
-}
 
+    #[test]
+    fn test_default_config_has_no_sections() {
+        let config = Config::default();
+        assert!(config.project.is_none());
+        assert!(config.version.is_none());
+        assert!(config.commands.is_none());
+        assert!(config.release.is_none());
+    }
+
+    #[test]
+    fn test_config_with_project_section() {
+        let tmp = TempDir::new().unwrap();
+        let config_path = tmp.path().join("config.toml");
+        fs::write(
+            &config_path,
+            r#"
+[project]
+type = "rust"
+release_branch = "main"
+"#,
+        )
+        .unwrap();
+
+        let config_path = Utf8PathBuf::try_from(config_path).unwrap();
+        let config = ConfigLoader::new()
+            .with_user_config(false)
+            .with_file(&config_path)
+            .load()
+            .unwrap();
+
+        let project = config.project.unwrap();
+        assert_eq!(
+            project.project_type,
+            Some(crate::ecosystem::Ecosystem::Rust)
+        );
+        assert_eq!(project.release_branch.as_deref(), Some("main"));
+    }
+
+    #[test]
+    fn test_config_with_commands_section() {
+        let tmp = TempDir::new().unwrap();
+        let config_path = tmp.path().join("config.toml");
+        fs::write(
+            &config_path,
+            r#"
+[commands]
+test = "cargo nextest run"
+build = "cargo build --release"
+"#,
+        )
+        .unwrap();
+
+        let config_path = Utf8PathBuf::try_from(config_path).unwrap();
+        let config = ConfigLoader::new()
+            .with_user_config(false)
+            .with_file(&config_path)
+            .load()
+            .unwrap();
+
+        let commands = config.commands.unwrap();
+        assert_eq!(commands.test.as_deref(), Some("cargo nextest run"));
+        assert_eq!(commands.build.as_deref(), Some("cargo build --release"));
+        assert!(commands.publish.is_none());
+    }
+
+    #[test]
+    fn test_config_with_release_section() {
+        let tmp = TempDir::new().unwrap();
+        let config_path = tmp.path().join("config.toml");
+        fs::write(
+            &config_path,
+            r#"
+[release]
+changelog_tool = "git-cliff"
+github_release = true
+postcard = false
+"#,
+        )
+        .unwrap();
+
+        let config_path = Utf8PathBuf::try_from(config_path).unwrap();
+        let config = ConfigLoader::new()
+            .with_user_config(false)
+            .with_file(&config_path)
+            .load()
+            .unwrap();
+
+        let release = config.release.unwrap();
+        assert_eq!(
+            release.changelog_tool,
+            Some(crate::ecosystem::ChangelogTool::GitCliff)
+        );
+        assert_eq!(release.github_release, Some(true));
+        assert_eq!(release.postcard, Some(false));
+    }
+
+    #[test]
+    fn test_config_ignores_unknown_sections() {
+        let tmp = TempDir::new().unwrap();
+        let config_path = tmp.path().join("config.toml");
+        fs::write(
+            &config_path,
+            r#"
+log_level = "warn"
+"#,
+        )
+        .unwrap();
+
+        let config_path = Utf8PathBuf::try_from(config_path).unwrap();
+        let config = ConfigLoader::new()
+            .with_user_config(false)
+            .with_file(&config_path)
+            .load()
+            .unwrap();
+
+        assert_eq!(config.log_level, LogLevel::Warn);
+        assert!(config.project.is_none());
+    }
+}

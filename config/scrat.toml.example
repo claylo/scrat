@@ -35,18 +35,39 @@ log_level = "info"
 # - otel_endpoint = "http://127.0.0.1:4317"
 
 # ------------------------------------------------------------------------------
-# Add your configuration options below
+# Project (auto-detected — override only when needed)
 # ------------------------------------------------------------------------------
 
-# Example: API endpoint
-# api_url = "https://api.example.com"
+# [project]
+# type = "rust"       # auto-detected from Cargo.toml / package.json
+# release_branch = "main"  # auto-detected: main > master
 
-# Example: Feature flags
-# [features]
-# experimental = false
-# telemetry = true
+# ------------------------------------------------------------------------------
+# Version Strategy (auto-detected from cliff.toml / cog.toml)
+# ------------------------------------------------------------------------------
 
-# Example: Output settings
-# [output]
-# format = "text"  # "text", "json", "table"
-# color = "auto"   # "auto", "always", "never"
+# [version]
+# strategy = "conventional-commits"  # "conventional-commits", "interactive", "explicit"
+
+# ------------------------------------------------------------------------------
+# Command Overrides (smart defaults per ecosystem)
+# ------------------------------------------------------------------------------
+
+# [commands]
+# test = "cargo nextest run"     # Rust default (if nextest installed)
+# build = "cargo build --release"
+# publish = "cargo publish"
+# clean = "cargo clean"
+
+# ------------------------------------------------------------------------------
+# Release Workflow
+# ------------------------------------------------------------------------------
+
+# [release]
+# changelog_tool = "git-cliff"  # or "cog"
+# github_release = true
+# postcard = false              # opt-in, requires ll-graphics + resvg
+
+# [release.notes]
+# template = "templates/release-notes.tera"
+# quote_corpus = "corpus/quotes.jsonl"

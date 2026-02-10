@@ -25,13 +25,13 @@ const LOG_FILE_SUFFIX: &str = ".jsonl";
 pub struct ObservabilityConfig {
     /// The service name used in log entries and traces.
     pub service: String,
-/// Directory for JSONL log files. Falls back to platform defaults if unset.
+    /// Directory for JSONL log files. Falls back to platform defaults if unset.
     pub log_dir: Option<PathBuf>,
 }
 
 impl ObservabilityConfig {
     /// Create config from environment variables with optional overrides.
-pub fn from_env_with_overrides(log_dir: Option<PathBuf>) -> Self {
+    pub fn from_env_with_overrides(log_dir: Option<PathBuf>) -> Self {
         Self {
             service: env!("CARGO_PKG_NAME").to_string(),
             log_dir,
@@ -55,7 +55,7 @@ impl LogTarget {
 /// Guard that must be held for the lifetime of the application to ensure
 /// proper cleanup of logging and tracing resources.
 pub struct ObservabilityGuard {
-_log_guard: tracing_appender::non_blocking::WorkerGuard,
+    _log_guard: tracing_appender::non_blocking::WorkerGuard,
 }
 
 /// Initialize observability (logging).
@@ -66,7 +66,10 @@ _log_guard: tracing_appender::non_blocking::WorkerGuard,
 ///
 /// Returns an error if no writable log directory can be found and stderr
 /// fallback is not acceptable for your use case.
-pub fn init_observability(cfg: &ObservabilityConfig, env_filter: EnvFilter) -> Result<ObservabilityGuard> {
+pub fn init_observability(
+    cfg: &ObservabilityConfig,
+    env_filter: EnvFilter,
+) -> Result<ObservabilityGuard> {
     let (log_writer, log_guard) = match build_log_writer(&cfg.service, cfg.log_dir.as_deref()) {
         Ok(result) => result,
         Err(err) => {
@@ -80,7 +83,7 @@ pub fn init_observability(cfg: &ObservabilityConfig, env_filter: EnvFilter) -> R
 
     let log_layer = JsonLogLayer::new(log_writer);
 
-tracing_subscriber::registry()
+    tracing_subscriber::registry()
         .with(env_filter)
         .with(log_layer)
         .init();
@@ -130,15 +133,27 @@ where
     S: tracing::Subscriber + for<'a> LookupSpan<'a>,
     W: for<'writer> tracing_subscriber::fmt::MakeWriter<'writer> + Send + Sync + 'static,
 {
-    fn on_new_span(&self, attrs: &tracing::span::Attributes<'_>, id: &tracing::span::Id, ctx: LayerContext<'_, S>) {
+    fn on_new_span(
+        &self,
+        attrs: &tracing::span::Attributes<'_>,
+        id: &tracing::span::Id,
+        ctx: LayerContext<'_, S>,
+    ) {
         if let Some(span) = ctx.span(id) {
             let mut visitor = JsonVisitor::default();
             attrs.record(&mut visitor);
-            span.extensions_mut().insert(SpanFields { values: visitor.values });
+            span.extensions_mut().insert(SpanFields {
+                values: visitor.values,
+            });
         }
     }
 
-    fn on_record(&self, id: &tracing::span::Id, values: &tracing::span::Record<'_>, ctx: LayerContext<'_, S>) {
+    fn on_record(
+        &self,
+        id: &tracing::span::Id,
+        values: &tracing::span::Record<'_>,
+        ctx: LayerContext<'_, S>,
+    ) {
         if let Some(span) = ctx.span(id) {
             let mut visitor = JsonVisitor::default();
             values.record(&mut visitor);
@@ -146,7 +161,9 @@ where
             if let Some(fields) = extensions.get_mut::<SpanFields>() {
                 fields.values.extend(visitor.values);
             } else {
-                extensions.insert(SpanFields { values: visitor.values });
+                extensions.insert(SpanFields {
+                    values: visitor.values,
+                });
             }
         }
     }
@@ -197,33 +214,46 @@ struct JsonVisitor {
 
 impl tracing::field::Visit for JsonVisitor {
     fn record_bool(&mut self, field: &tracing::field::Field, value: bool) {
-        self.values.insert(field.name().to_string(), Value::Bool(value));
+        self.values
+            .insert(field.name().to_string(), Value::Bool(value));
     }
 
     fn record_i64(&mut self, field: &tracing::field::Field, value: i64) {
-        self.values.insert(field.name().to_string(), Value::Number(value.into()));
+        self.values
+            .insert(field.name().to_string(), Value::Number(value.into()));
     }
 
     fn record_u64(&mut self, field: &tracing::field::Field, value: u64) {
-        self.values.insert(field.name().to_string(), Value::Number(value.into()));
+        self.values
+            .insert(field.name().to_string(), Value::Number(value.into()));
     }
 
     fn record_f64(&mut self, field: &tracing::field::Field, value: f64) {
         if let Some(number) = serde_json::Number::from_f64(value) {
-            self.values.insert(field.name().to_string(), Value::Number(number));
+            self.values
+                .insert(field.name().to_string(), Value::Number(number));
         }
     }
 
     fn record_str(&mut self, field: &tracing::field::Field, value: &str) {
-        self.values.insert(field.name().to_string(), Value::String(value.to_string()));
+        self.values
+            .insert(field.name().to_string(), Value::String(value.to_string()));
     }
 
-    fn record_error(&mut self, field: &tracing::field::Field, value: &(dyn std::error::Error + 'static)) {
-        self.values.insert(field.name().to_string(), Value::String(value.to_string()));
+    fn record_error(
+        &mut self,
+        field: &tracing::field::Field,
+        value: &(dyn std::error::Error + 'static),
+    ) {
+        self.values
+            .insert(field.name().to_string(), Value::String(value.to_string()));
     }
 
     fn record_debug(&mut self, field: &tracing::field::Field, value: &dyn std::fmt::Debug) {
-        self.values.insert(field.name().to_string(), Value::String(format!("{value:?}")));
+        self.values.insert(
+            field.name().to_string(),
+            Value::String(format!("{value:?}")),
+        );
     }
 }
 
@@ -282,8 +312,7 @@ fn build_log_writer(
     tracing_appender::non_blocking::NonBlocking,
     tracing_appender::non_blocking::WorkerGuard,
 )> {
-    let target = resolve_log_target(service, config_log_dir)
-        .map_err(|e| anyhow::anyhow!("{e}"))?;
+    let target = resolve_log_target(service, config_log_dir).map_err(|e| anyhow::anyhow!("{e}"))?;
 
     let appender = tracing_appender::rolling::daily(&target.dir, &target.file_name);
     let (writer, guard) = tracing_appender::non_blocking(appender);
@@ -295,7 +324,12 @@ fn resolve_log_target(service: &str, config_log_dir: Option<&Path>) -> Result<Lo
     let path_override = std::env::var_os(ENV_LOG_PATH).map(PathBuf::from);
     let dir_override = std::env::var_os(ENV_LOG_DIR).map(PathBuf::from);
 
-    resolve_log_target_with(service, path_override, dir_override, config_log_dir.map(PathBuf::from))
+    resolve_log_target_with(
+        service,
+        path_override,
+        dir_override,
+        config_log_dir.map(PathBuf::from),
+    )
 }
 
 fn resolve_log_target_with(
@@ -473,6 +507,4 @@ mod tests {
         // 2024-02-29 (leap year) = day 19782
         assert_eq!(days_to_ymd(19782), (2024, 2, 29));
     }
-
 }
-
