@@ -16,6 +16,7 @@
 //! - [`pipeline`] - Pipeline context accumulator for structured release data
 //! - [`preflight`] - Release readiness checks
 //! - [`ship`] - Ship orchestrator (full release workflow)
+//! - [`stats`] - Release statistics (commits, files changed, contributors)
 //! - [`version`] - Version determination and computation
 //!
 //! # Quick Start
@@ -53,6 +54,8 @@ pub mod pipeline;
 pub mod preflight;
 
 pub mod ship;
+
+pub mod stats;
 
 pub mod version;
 
