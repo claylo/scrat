@@ -5,7 +5,7 @@ use thiserror::Error;
 /// Errors that can occur when working with configuration.
 #[derive(Error, Debug)]
 pub enum ConfigError {
-/// Failed to deserialize configuration.
+    /// Failed to deserialize configuration.
     #[error("invalid configuration: {0}")]
     Deserialize(#[from] Box<figment::Error>),
 

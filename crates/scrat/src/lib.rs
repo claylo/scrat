@@ -17,7 +17,6 @@
 
 pub mod commands;
 
-
 use clap::{CommandFactory, Parser, Subcommand};
 use std::path::PathBuf;
 
@@ -91,13 +90,11 @@ pub struct Cli {
 /// Available subcommands for the CLI.
 #[derive(Subcommand)]
 pub enum Commands {
-
     /// Diagnose configuration and environment
     Doctor(commands::doctor::DoctorArgs),
 
     /// Show package information
     Info(commands::info::InfoArgs),
-
 }
 
 /// Returns the clap command for documentation generation

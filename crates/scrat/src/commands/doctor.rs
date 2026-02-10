@@ -1,12 +1,12 @@
 //! Doctor command — diagnose configuration and environment.
 
 use clap::Args;
-use owo_colors::OwoColorize;
-use serde::Serialize;
-use tracing::{debug, instrument};
-use scrat_core::config;
 use indicatif::{ProgressBar, ProgressStyle};
 use inquire::Confirm;
+use owo_colors::OwoColorize;
+use scrat_core::config;
+use serde::Serialize;
+use tracing::{debug, instrument};
 /// Arguments for the `doctor` subcommand.
 #[derive(Args, Debug, Default)]
 pub struct DoctorArgs {
@@ -89,7 +89,6 @@ impl DoctorReport {
                         value: std::env::var("RUST_LOG").ok(),
                         description: "Log filter directive",
                     },
-
                 ],
             },
         }
@@ -102,34 +101,39 @@ impl DoctorReport {
 /// * `global_json` - Global `--json` flag from CLI
 /// * `cwd` - Current working directory
 #[instrument(name = "cmd_doctor", skip_all, fields(json_output))]
-pub fn cmd_doctor(_args: DoctorArgs, global_json: bool, cwd: &camino::Utf8Path) -> anyhow::Result<()> {
-    debug!(
-        json_output = global_json,
-        "executing doctor command"
-    );
+pub fn cmd_doctor(
+    _args: DoctorArgs,
+    global_json: bool,
+    cwd: &camino::Utf8Path,
+) -> anyhow::Result<()> {
+    debug!(json_output = global_json, "executing doctor command");
 
-let spinner = ProgressBar::new_spinner();
+    let spinner = ProgressBar::new_spinner();
     spinner.set_style(
         ProgressStyle::default_spinner()
             .template("{spinner:.cyan} {msg}")
-            .expect("valid template")
+            .expect("valid template"),
     );
     spinner.set_message("Gathering diagnostics...");
     spinner.enable_steady_tick(std::time::Duration::from_millis(80));
 
     let report = DoctorReport::gather(cwd);
     spinner.finish_and_clear();
-if global_json {
+    if global_json {
         println!("{}", serde_json::to_string_pretty(&report)?);
     } else {
         // Config status
         println!("{}", "Configuration".bold().underline());
         if report.config.found {
-            println!("  {} Config file: {}", "✓".green(), report.config.file.as_deref().unwrap_or("").cyan());
+            println!(
+                "  {} Config file: {}",
+                "✓".green(),
+                report.config.file.as_deref().unwrap_or("").cyan()
+            );
         } else {
             println!("  {} No config file found", "○".yellow());
-offer_config_creation()?;
-}
+            offer_config_creation()?;
+        }
         println!();
 
         // Directories
@@ -144,7 +148,10 @@ offer_config_creation()?;
         println!("{}", "Environment".bold().underline());
         println!("  {}: {}", "Working directory".dimmed(), cwd.cyan());
 
-        let set_vars: Vec<_> = report.environment.env_vars.iter()
+        let set_vars: Vec<_> = report
+            .environment
+            .env_vars
+            .iter()
             .filter(|v| v.value.is_some())
             .collect();
 
@@ -152,7 +159,11 @@ offer_config_creation()?;
             println!("  {} No XDG/logging overrides set", "○".dimmed());
         } else {
             for var in set_vars {
-                println!("  {}: {}", var.name.dimmed(), var.value.as_deref().unwrap_or("").cyan());
+                println!(
+                    "  {}: {}",
+                    var.name.dimmed(),
+                    var.value.as_deref().unwrap_or("").cyan()
+                );
             }
         }
     }
@@ -194,8 +205,8 @@ fn offer_config_creation() -> anyhow::Result<()> {
             }
 
             // Write default config as YAML
-let default_config = scrat_core::config::Config::default();
-let yaml = serde_saphyr::to_string(&default_config)?;
+            let default_config = scrat_core::config::Config::default();
+            let yaml = serde_saphyr::to_string(&default_config)?;
             std::fs::write(&config_path, yaml)?;
 
             println!("  {} Created {}", "✓".green(), config_path.cyan());
@@ -236,4 +247,3 @@ mod tests {
         assert!(report.directories.config.is_some() || report.directories.cache.is_some());
     }
 }
-

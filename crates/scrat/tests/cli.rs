@@ -73,15 +73,11 @@ fn info_shows_package_name_and_version() {
 
 #[test]
 fn info_json_outputs_valid_json() {
-    let output = cmd()
-        .arg("info")
-        .arg("--json")
-        .assert()
-        .success();
+    let output = cmd().arg("info").arg("--json").assert().success();
 
     let stdout = String::from_utf8_lossy(&output.get_output().stdout);
-    let json: serde_json::Value = serde_json::from_str(&stdout)
-        .expect("info --json should output valid JSON");
+    let json: serde_json::Value =
+        serde_json::from_str(&stdout).expect("info --json should output valid JSON");
 
     assert_eq!(json["name"], env!("CARGO_PKG_NAME"));
     assert_eq!(json["version"], env!("CARGO_PKG_VERSION"));
@@ -113,66 +109,42 @@ fn info_help_shows_command_options() {
 
 #[test]
 fn quiet_flag_accepted() {
-    cmd()
-        .args(["--quiet", "info"])
-        .assert()
-        .success();
+    cmd().args(["--quiet", "info"]).assert().success();
 }
 
 #[test]
 fn short_quiet_flag_accepted() {
-    cmd()
-        .args(["-q", "info"])
-        .assert()
-        .success();
+    cmd().args(["-q", "info"]).assert().success();
 }
 
 #[test]
 fn verbose_flag_accepted() {
-    cmd()
-        .args(["--verbose", "info"])
-        .assert()
-        .success();
+    cmd().args(["--verbose", "info"]).assert().success();
 }
 
 #[test]
 fn short_verbose_flag_accepted() {
-    cmd()
-        .args(["-v", "info"])
-        .assert()
-        .success();
+    cmd().args(["-v", "info"]).assert().success();
 }
 
 #[test]
 fn multiple_verbose_flags_accepted() {
-    cmd()
-        .args(["-vv", "info"])
-        .assert()
-        .success();
+    cmd().args(["-vv", "info"]).assert().success();
 }
 
 #[test]
 fn color_auto_accepted() {
-    cmd()
-        .args(["--color", "auto", "info"])
-        .assert()
-        .success();
+    cmd().args(["--color", "auto", "info"]).assert().success();
 }
 
 #[test]
 fn color_always_accepted() {
-    cmd()
-        .args(["--color", "always", "info"])
-        .assert()
-        .success();
+    cmd().args(["--color", "always", "info"]).assert().success();
 }
 
 #[test]
 fn color_never_accepted() {
-    cmd()
-        .args(["--color", "never", "info"])
-        .assert()
-        .success();
+    cmd().args(["--color", "never", "info"]).assert().success();
 }
 
 // =============================================================================
@@ -213,10 +185,7 @@ fn invalid_flag_shows_error() {
 fn chdir_flag_changes_directory() {
     // The -C flag should be accepted and work without error
     // We use a path that definitely exists
-    cmd()
-        .args(["-C", "/tmp", "info"])
-        .assert()
-        .success();
+    cmd().args(["-C", "/tmp", "info"]).assert().success();
 }
 
 #[test]
