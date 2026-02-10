@@ -142,9 +142,7 @@ pub fn check_tool_version(binary: &str, minimum: &semver::Version) -> ToolVersio
             ));
         }
         Err(e) => {
-            return ToolVersionCheck::Unknown(format!(
-                "failed to run `{binary} --version`: {e}",
-            ));
+            return ToolVersionCheck::Unknown(format!("failed to run `{binary} --version`: {e}",));
         }
     };
 
@@ -291,10 +289,7 @@ mod tests {
     #[test]
     fn parse_version_with_prerelease() {
         let v = parse_version_from_output("tool 3.0.0-rc.1");
-        assert_eq!(
-            v,
-            Some(semver::Version::parse("3.0.0-rc.1").unwrap())
-        );
+        assert_eq!(v, Some(semver::Version::parse("3.0.0-rc.1").unwrap()));
     }
 
     #[test]
