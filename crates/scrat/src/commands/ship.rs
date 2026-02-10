@@ -3,7 +3,7 @@
 use anyhow::{Context, bail};
 use clap::Args;
 use indicatif::{ProgressBar, ProgressStyle};
-use inquire::Select;
+use inquire::{Confirm, Select};
 use owo_colors::OwoColorize;
 use tracing::{debug, instrument};
 
@@ -40,6 +40,10 @@ pub struct ShipArgs {
     /// Preview what would happen without making changes
     #[arg(long)]
     pub dry_run: bool,
+
+    /// Skip confirmation prompt
+    #[arg(long, short = 'y')]
+    pub yes: bool,
 }
 
 /// Execute the ship command.
@@ -55,6 +59,8 @@ pub fn cmd_ship(
         dry_run = args.dry_run,
         "executing ship command"
     );
+
+    let skip_confirm = args.yes;
 
     let options = ShipOptions {
         explicit_version: args.version,
@@ -100,6 +106,28 @@ pub fn cmd_ship(
             ready.detection.ecosystem,
         );
         println!();
+    }
+
+    // Confirm before executing (unless dry-run, --yes, or config says no)
+    if !is_dry && !global_json {
+        let config_confirm = config
+            .ship
+            .as_ref()
+            .and_then(|s| s.confirm)
+            .unwrap_or(true);
+
+        if config_confirm && !skip_confirm {
+            print_phase_summary(&ready.options, config);
+            let confirmed = Confirm::new("Proceed with release?")
+                .with_default(true)
+                .prompt()
+                .context("confirmation prompt failed")?;
+            if !confirmed {
+                println!("{}", "Ship cancelled.".yellow());
+                return Ok(());
+            }
+            println!();
+        }
     }
 
     // Execute with progress display
@@ -248,6 +276,70 @@ fn prompt_interactive_version(
         .unwrap_or(&selection);
 
     scrat_core::version::parse_version(version_str).context("failed to parse selected version")
+}
+
+/// Print a summary of phases and hooks before the confirmation prompt.
+fn print_phase_summary(options: &ShipOptions, config: &Config) {
+    let phases: &[(&str, bool)] = &[
+        ("test", !options.skip_tests),
+        ("bump", true),
+        ("publish", !options.no_publish),
+        ("git", true),
+        ("release", !options.no_release),
+    ];
+
+    let active: Vec<&str> = phases.iter().filter(|(_, on)| *on).map(|(n, _)| *n).collect();
+    let skipped: Vec<&str> = phases
+        .iter()
+        .filter(|(_, on)| !*on)
+        .map(|(n, _)| *n)
+        .collect();
+
+    print!("  {}: {}", "Phases".dimmed(), active.join(", ").bold());
+    if !skipped.is_empty() {
+        print!(
+            " {}",
+            format!("(skip: {})", skipped.join(", ")).dimmed()
+        );
+    }
+    println!();
+
+    let hook_count = count_hooks(config);
+    if hook_count > 0 {
+        println!(
+            "  {}: {} hook command{}",
+            "Hooks".dimmed(),
+            hook_count,
+            if hook_count == 1 { "" } else { "s" }
+        );
+    }
+
+    println!();
+}
+
+/// Count total hook commands configured.
+fn count_hooks(config: &Config) -> usize {
+    let Some(hooks) = config.hooks.as_ref() else {
+        return 0;
+    };
+    [
+        hooks.pre_ship.as_ref(),
+        hooks.post_ship.as_ref(),
+        hooks.pre_test.as_ref(),
+        hooks.post_test.as_ref(),
+        hooks.pre_bump.as_ref(),
+        hooks.post_bump.as_ref(),
+        hooks.pre_publish.as_ref(),
+        hooks.post_publish.as_ref(),
+        hooks.pre_tag.as_ref(),
+        hooks.post_tag.as_ref(),
+        hooks.pre_release.as_ref(),
+        hooks.post_release.as_ref(),
+    ]
+    .iter()
+    .filter_map(|h| h.as_ref())
+    .map(|cmds| cmds.len())
+    .sum()
 }
 
 /// Print the :shipit: squirrel — a scrat tradition.

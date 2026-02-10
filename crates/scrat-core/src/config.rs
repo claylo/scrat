@@ -62,6 +62,8 @@ pub struct Config {
     pub release: Option<ReleaseConfig>,
     /// Hook commands per release phase.
     pub hooks: Option<HooksConfig>,
+    /// Ship command behavior.
+    pub ship: Option<ShipConfig>,
 }
 
 /// Project-level configuration overrides.
@@ -167,6 +169,17 @@ pub struct HooksConfig {
     pub pre_release: Option<Vec<String>>,
     /// Commands to run after the GitHub release is created.
     pub post_release: Option<Vec<String>>,
+}
+
+/// Ship command behavior.
+#[derive(Debug, Clone, Default, Deserialize, Serialize, PartialEq, Eq)]
+pub struct ShipConfig {
+    /// Prompt for confirmation before executing (default: true).
+    ///
+    /// When `None` or `Some(true)`, `scrat ship` shows the plan and asks
+    /// for confirmation before executing. Set to `false` for CI/scripted use.
+    /// The `--yes`/`-y` CLI flag overrides this at runtime.
+    pub confirm: Option<bool>,
 }
 
 /// Log level configuration.
@@ -811,6 +824,36 @@ post_release = ["echo post-release"]
         assert!(hooks.post_tag.is_some());
         assert!(hooks.pre_release.is_some());
         assert!(hooks.post_release.is_some());
+    }
+
+    #[test]
+    fn test_config_with_ship_section() {
+        let tmp = TempDir::new().unwrap();
+        let config_path = tmp.path().join("config.toml");
+        fs::write(
+            &config_path,
+            r#"
+[ship]
+confirm = false
+"#,
+        )
+        .unwrap();
+
+        let config_path = Utf8PathBuf::try_from(config_path).unwrap();
+        let config = ConfigLoader::new()
+            .with_user_config(false)
+            .with_file(&config_path)
+            .load()
+            .unwrap();
+
+        let ship = config.ship.unwrap();
+        assert_eq!(ship.confirm, Some(false));
+    }
+
+    #[test]
+    fn test_config_ship_defaults_to_none() {
+        let config = Config::default();
+        assert!(config.ship.is_none());
     }
 
     #[test]

@@ -241,7 +241,7 @@ fn check_required_tools(detection: &ProjectDetection) -> CheckResult {
         missing.push(bin.to_string());
     }
 
-    // Check changelog tool binary
+    // Check changelog tool binary + minimum version
     if let Some(ref tool) = detection.tools.changelog_tool {
         let bin = tool.to_string();
         if !detect::has_binary(&bin) {
@@ -249,18 +249,39 @@ fn check_required_tools(detection: &ProjectDetection) -> CheckResult {
         }
     }
 
-    if missing.is_empty() {
-        CheckResult {
-            name: "Required tools".into(),
-            passed: true,
-            message: "All required tools are installed".into(),
-        }
-    } else {
-        CheckResult {
+    if !missing.is_empty() {
+        return CheckResult {
             name: "Required tools".into(),
             passed: false,
             message: format!("Missing tools: {}", missing.join(", ")),
+        };
+    }
+
+    // Version check for git-cliff (requires 2.5.0+ for --bump [type])
+    if detection.tools.changelog_tool == Some(crate::ecosystem::ChangelogTool::GitCliff) {
+        match detect::check_tool_version("git-cliff", &detect::MIN_GIT_CLIFF_VERSION) {
+            detect::ToolVersionCheck::Ok(v) => {
+                debug!(%v, "git-cliff version ok");
+            }
+            detect::ToolVersionCheck::TooOld { found, minimum } => {
+                return CheckResult {
+                    name: "Required tools".into(),
+                    passed: false,
+                    message: format!(
+                        "git-cliff {found} is too old (need {minimum}+) — run `cargo install git-cliff`"
+                    ),
+                };
+            }
+            detect::ToolVersionCheck::Unknown(reason) => {
+                debug!(reason, "could not check git-cliff version");
+            }
         }
+    }
+
+    CheckResult {
+        name: "Required tools".into(),
+        passed: true,
+        message: "All required tools are installed".into(),
     }
 }
 
