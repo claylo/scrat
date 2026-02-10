@@ -1,0 +1,44 @@
+# Changes here will be overwritten by Copier
+_src_path: gh:claylo/claylo-rs
+conduct_email: conduct@lovelesslabs.com
+copyright_name: Clay Loveless
+copyright_year: '2026'
+has_agents_md: 'true'
+has_benchmarks: 'false'
+has_claude: 'true'
+has_claude_commands: 'true'
+has_claude_skills: 'true'
+has_cli: 'true'
+has_coda: 'true'
+has_community_files: 'false'
+has_config: 'true'
+has_core_library: 'true'
+has_editorconfig: 'false'
+has_env_files: 'false'
+has_gitattributes: 'true'
+has_github: 'true'
+has_indicatif: 'true'
+has_inquire: 'true'
+has_issue_templates: 'true'
+has_jsonl_logging: 'true'
+has_just: 'true'
+has_mcp_server: 'false'
+has_md: 'true'
+has_md_strict: 'false'
+has_opentelemetry: 'false'
+has_pr_templates: 'true'
+has_releases: 'true'
+has_roadmap_votes: 'false'
+has_security_md: 'true'
+has_site: 'false'
+has_skill_capturing_decisions: 'true'
+has_skill_markdown_authoring: 'true'
+has_skill_using_git: 'true'
+has_xtask: 'true'
+has_yamlfmt: 'false'
+has_yamllint: 'false'
+lint_level: strict
+owner: claylo
+preset: standard
+project_description: Release management tooling focused on sanity retention
+project_name: scrat

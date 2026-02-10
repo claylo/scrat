@@ -1,0 +1,457 @@
+name: CD
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+
+permissions:
+  contents: write
+  id-token: write      # Sigstore OIDC for attestations
+  attestations: write  # Persist attestations
+
+env:
+  CARGO_TERM_COLOR: always
+  PROJECT_NAME: scrat
+
+jobs:
+  generate-changelog:
+    name: Generate changelog
+    runs-on: ubuntu-latest
+    outputs:
+      release_body: ${{ steps.git-cliff.outputs.content }}
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.1
+        with:
+          fetch-depth: 0
+
+      - name: Extract version
+        id: version
+        run: echo "version=${GITHUB_REF#refs/tags/v}" >> $GITHUB_OUTPUT
+
+      - name: Generate changelog
+        uses: orhun/git-cliff-action@e16f179f0be49ecdfe63753837f20b9531642772 # v4.7.0
+        id: git-cliff
+        with:
+          config: cliff.toml
+          args: -vv --latest --no-exec --github-repo ${{ github.repository }}
+
+  publish-binaries:
+    name: Build ${{ matrix.build.NAME }}
+    needs: generate-changelog
+    runs-on: ${{ matrix.build.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        build:
+          - { NAME: linux-x64-gnu, os: ubuntu-22.04, target: x86_64-unknown-linux-gnu }
+          - { NAME: linux-x64-musl, os: ubuntu-22.04, target: x86_64-unknown-linux-musl }
+          - { NAME: linux-arm64-gnu, os: ubuntu-22.04, target: aarch64-unknown-linux-gnu }
+          - { NAME: linux-arm64-musl, os: ubuntu-22.04, target: aarch64-unknown-linux-musl }
+          - { NAME: darwin-x64, os: macos-15, target: x86_64-apple-darwin }
+          - { NAME: darwin-arm64, os: macos-15, target: aarch64-apple-darwin }
+          - { NAME: windows-x64-msvc, os: windows-2025, target: x86_64-pc-windows-msvc }
+          - { NAME: windows-arm64-msvc, os: windows-2025, target: aarch64-pc-windows-msvc }
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.1
+
+      - name: Install musl tools
+        if: contains(matrix.build.target, 'musl')
+        run: sudo apt-get update && sudo apt-get install -y musl-tools
+
+      - name: Install cross-compilation tools
+        if: matrix.build.target == 'aarch64-unknown-linux-gnu'
+        run: sudo apt-get update && sudo apt-get install -y gcc-aarch64-linux-gnu
+
+      - name: Rust toolchain
+        uses: dtolnay/rust-toolchain@e97e2d8cc328f1b50210efc529dca0028893a2d9 # v1
+        with:
+          toolchain: stable
+          targets: ${{ matrix.build.target }}
+
+      - name: Rust cache
+        uses: ./.github/actions/setup-rust-cache
+        with:
+          cache-key-suffix: release-${{ matrix.build.target }}
+          toolchain: stable
+
+      - name: Install cargo-auditable
+        uses: ./.github/actions/setup-cargo-tools
+        with:
+          binstall-tools: cargo-auditable
+
+      - name: Build
+        shell: bash
+        run: |
+          if [[ "${{ matrix.build.os }}" == "ubuntu-22.04" && "${{ matrix.build.target }}" == "aarch64-unknown-linux-gnu" ]]; then
+            export CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER=aarch64-linux-gnu-gcc
+          fi
+          cargo auditable build --release --locked --target ${{ matrix.build.target }}
+
+
+      - name: Generate man pages
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          mkdir -p dist/share/man/man1
+          cargo run --package xtask -- man --out-dir dist/share/man/man1
+
+      - name: Generate shell completions
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          mkdir -p dist/share/completions
+          cargo run --package xtask -- completions --out-dir dist/share/completions
+
+      - name: Install cargo-cyclonedx
+        if: vars.SBOM_ENABLED == 'true'
+        uses: ./.github/actions/setup-cargo-tools
+        with:
+          binstall-tools: cargo-cyclonedx
+
+      - name: Generate SBOM
+        if: vars.SBOM_ENABLED == 'true'
+        run: cargo cyclonedx --target ${{ matrix.build.target }} --format json
+
+      - name: Prepare release assets
+        shell: bash
+        env:
+          VERSION: ${{ needs.generate-changelog.outputs.version }}
+          TARGET: ${{ matrix.build.target }}
+        run: |
+          mkdir -p release/bin release/share
+          cp LICENSE-* README.md CHANGELOG.md release/ 2>/dev/null || true
+
+          # Binary
+          bin="$PROJECT_NAME"
+          if [[ "${{ matrix.build.os }}" == "windows-2025" ]]; then
+            bin="${bin}.exe"
+          fi
+          cp "target/${TARGET}/release/${bin}" release/bin/
+
+          # Man pages and completions (Unix only)
+          if [[ -d dist/share/man ]]; then
+            cp -r dist/share/man release/share/
+          fi
+          if [[ -d dist/share/completions ]]; then
+            cp -r dist/share/completions release/share/
+          fi
+
+          # Package
+          cd release
+          if [[ "${{ matrix.build.os }}" == "windows-2025" ]]; then
+            7z a -tzip "../${PROJECT_NAME}-${VERSION}-${TARGET}.zip" *
+          else
+            tar -czvf "../${PROJECT_NAME}-${VERSION}-${TARGET}.tar.gz" *
+            shasum -a 256 "../${PROJECT_NAME}-${VERSION}-${TARGET}.tar.gz" > "../${PROJECT_NAME}-${VERSION}-${TARGET}.tar.gz.sha256"
+          fi
+
+      - name: Sign release (GPG)
+        if: (matrix.build.os == 'ubuntu-22.04' || matrix.build.os == 'macos-15') && vars.GPG_SIGNING_ENABLED == 'true'
+        env:
+          VERSION: ${{ needs.generate-changelog.outputs.version }}
+          TARGET: ${{ matrix.build.target }}
+        run: |
+          echo "${{ secrets.GPG_RELEASE_KEY }}" | base64 --decode > private.key
+          echo "${{ secrets.GPG_PASSPHRASE }}" | gpg --pinentry-mode=loopback --passphrase-fd 0 --import private.key
+          echo "${{ secrets.GPG_PASSPHRASE }}" | gpg --pinentry-mode=loopback --passphrase-fd 0 --detach-sign "${PROJECT_NAME}-${VERSION}-${TARGET}.tar.gz"
+
+      - name: Upload release
+        if: ${{ !contains(github.ref, '-') }}
+        uses: svenstaro/upload-release-action@6b7fa9f267e90b50a19fef07b3596790bb941741 # 2.11.3
+        with:
+          repo_token: ${{ secrets.GITHUB_TOKEN }}
+          file: ${{ env.PROJECT_NAME }}-${{ needs.generate-changelog.outputs.version }}-${{ matrix.build.target }}*
+          file_glob: true
+          overwrite: true
+          tag: ${{ github.ref }}
+          release_name: "Release v${{ needs.generate-changelog.outputs.version }}"
+          body: "${{ needs.generate-changelog.outputs.release_body }}"
+
+      - name: Upload pre-release
+        if: ${{ contains(github.ref, '-') }}
+        uses: svenstaro/upload-release-action@6b7fa9f267e90b50a19fef07b3596790bb941741 # 2.11.3
+        with:
+          repo_token: ${{ secrets.GITHUB_TOKEN }}
+          file: ${{ env.PROJECT_NAME }}-${{ needs.generate-changelog.outputs.version }}-${{ matrix.build.target }}*
+          file_glob: true
+          overwrite: true
+          tag: ${{ github.ref }}
+          release_name: "Pre-release v${{ needs.generate-changelog.outputs.version }}"
+          prerelease: true
+
+
+      - name: Generate artifact attestation
+        uses: actions/attest-build-provenance@96278af6caaf10aea03fd8d33a09a777ca52d62f # v3.2.0
+        with:
+          subject-path: ${{ env.PROJECT_NAME }}-${{ needs.generate-changelog.outputs.version }}-${{ matrix.build.target }}*
+
+
+  publish-crates-io:
+    name: Publish to crates.io
+    if: ${{ !contains(github.ref, '-') && vars.CRATES_IO_ENABLED == 'true' }}
+    needs: generate-changelog
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.1
+
+      - name: Rust toolchain
+        uses: dtolnay/rust-toolchain@e97e2d8cc328f1b50210efc529dca0028893a2d9 # v1
+        with:
+          toolchain: stable
+
+      - name: Publish
+        run: cargo publish --locked --token ${{ secrets.CARGO_TOKEN }}
+
+  publish-homebrew:
+    name: Publish Homebrew formula
+    if: ${{ !contains(github.ref, '-') && vars.HOMEBREW_ENABLED == 'true' }}
+    needs: publish-binaries
+    runs-on: ubuntu-latest
+    steps:
+      - name: Bump formula
+        uses: mislav/bump-homebrew-formula-action@56a283fa15557e9abaa4bdb63b8212abc68e655c # v3.6
+        with:
+          formula-name: ${{ env.PROJECT_NAME }}
+        env:
+          COMMITTER_TOKEN: ${{ secrets.HOMEBREW_COMMITTER_TOKEN }}
+
+  publish-deb:
+    name: Publish Debian package
+    if: vars.DEB_ENABLED == 'true'
+    needs: generate-changelog
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.1
+
+      - name: Rust toolchain
+        uses: dtolnay/rust-toolchain@e97e2d8cc328f1b50210efc529dca0028893a2d9 # v1
+        with:
+          toolchain: stable
+          targets: x86_64-unknown-linux-gnu
+
+      - name: Install cargo-deb
+        uses: ./.github/actions/setup-cargo-tools
+        with:
+          binstall-tools: cargo-deb
+
+      - name: Build Debian package
+        env:
+          VERSION: ${{ needs.generate-changelog.outputs.version }}
+        run: |
+          cargo build --release --locked
+          cargo deb --no-build -o "${PROJECT_NAME}-${VERSION}.deb"
+
+      - name: Sign package
+        if: vars.GPG_SIGNING_ENABLED == 'true'
+        env:
+          VERSION: ${{ needs.generate-changelog.outputs.version }}
+        run: |
+          echo "${{ secrets.GPG_RELEASE_KEY }}" | base64 --decode > private.key
+          echo "${{ secrets.GPG_PASSPHRASE }}" | gpg --pinentry-mode=loopback --passphrase-fd 0 --import private.key
+          echo "${{ secrets.GPG_PASSPHRASE }}" | gpg --pinentry-mode=loopback --passphrase-fd 0 --detach-sign "${PROJECT_NAME}-${VERSION}.deb"
+
+      - name: Upload release
+        if: ${{ !contains(github.ref, '-') }}
+        uses: svenstaro/upload-release-action@6b7fa9f267e90b50a19fef07b3596790bb941741 # 2.11.3
+        with:
+          repo_token: ${{ secrets.GITHUB_TOKEN }}
+          file: ${{ env.PROJECT_NAME }}-${{ needs.generate-changelog.outputs.version }}.deb*
+          file_glob: true
+          overwrite: true
+          tag: ${{ github.ref }}
+          release_name: "Release v${{ needs.generate-changelog.outputs.version }}"
+          body: "${{ needs.generate-changelog.outputs.release_body }}"
+
+      - name: Upload pre-release
+        if: ${{ contains(github.ref, '-') }}
+        uses: svenstaro/upload-release-action@6b7fa9f267e90b50a19fef07b3596790bb941741 # 2.11.3
+        with:
+          repo_token: ${{ secrets.GITHUB_TOKEN }}
+          file: ${{ env.PROJECT_NAME }}-${{ needs.generate-changelog.outputs.version }}.deb*
+          file_glob: true
+          overwrite: true
+          tag: ${{ github.ref }}
+          release_name: "Pre-release v${{ needs.generate-changelog.outputs.version }}"
+          prerelease: true
+
+  publish-rpm:
+    name: Publish RPM package
+    if: vars.RPM_ENABLED == 'true'
+    needs: generate-changelog
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.1
+
+      - name: Rust toolchain
+        uses: dtolnay/rust-toolchain@e97e2d8cc328f1b50210efc529dca0028893a2d9 # v1
+        with:
+          toolchain: stable
+          targets: x86_64-unknown-linux-gnu
+
+      - name: Install cargo-generate-rpm
+        uses: ./.github/actions/setup-cargo-tools
+        with:
+          binstall-tools: cargo-generate-rpm
+
+      - name: Build RPM package
+        env:
+          VERSION: ${{ needs.generate-changelog.outputs.version }}
+        run: |
+          cargo build --release --locked
+          cargo generate-rpm -o "${PROJECT_NAME}-${VERSION}.x86_64.rpm"
+
+      - name: Sign package
+        if: vars.GPG_SIGNING_ENABLED == 'true'
+        env:
+          VERSION: ${{ needs.generate-changelog.outputs.version }}
+        run: |
+          echo "${{ secrets.GPG_RELEASE_KEY }}" | base64 --decode > private.key
+          echo "${{ secrets.GPG_PASSPHRASE }}" | gpg --pinentry-mode=loopback --passphrase-fd 0 --import private.key
+          echo "${{ secrets.GPG_PASSPHRASE }}" | gpg --pinentry-mode=loopback --passphrase-fd 0 --detach-sign "${PROJECT_NAME}-${VERSION}.x86_64.rpm"
+
+      - name: Upload release
+        if: ${{ !contains(github.ref, '-') }}
+        uses: svenstaro/upload-release-action@6b7fa9f267e90b50a19fef07b3596790bb941741 # 2.11.3
+        with:
+          repo_token: ${{ secrets.GITHUB_TOKEN }}
+          file: ${{ env.PROJECT_NAME }}-${{ needs.generate-changelog.outputs.version }}.x86_64.rpm*
+          file_glob: true
+          overwrite: true
+          tag: ${{ github.ref }}
+          release_name: "Release v${{ needs.generate-changelog.outputs.version }}"
+          body: "${{ needs.generate-changelog.outputs.release_body }}"
+
+      - name: Upload pre-release
+        if: ${{ contains(github.ref, '-') }}
+        uses: svenstaro/upload-release-action@6b7fa9f267e90b50a19fef07b3596790bb941741 # 2.11.3
+        with:
+          repo_token: ${{ secrets.GITHUB_TOKEN }}
+          file: ${{ env.PROJECT_NAME }}-${{ needs.generate-changelog.outputs.version }}.x86_64.rpm*
+          file_glob: true
+          overwrite: true
+          tag: ${{ github.ref }}
+          release_name: "Pre-release v${{ needs.generate-changelog.outputs.version }}"
+          prerelease: true
+
+  publish-npm:
+    name: Publish to npm
+    if: ${{ !contains(github.ref, '-') && vars.NPM_ENABLED == 'true' }}
+    needs: [generate-changelog, publish-binaries]
+    runs-on: ubuntu-latest
+    env:
+      VERSION: ${{ needs.generate-changelog.outputs.version }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.1
+
+      - name: Setup Node
+        uses: actions/setup-node@6044e13b5dc448c55e2357c09f80417699197238 # v6.2.0
+        with:
+          node-version: 20
+          registry-url: "https://registry.npmjs.org"
+
+      - name: Download release artifacts
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          mkdir -p artifacts
+          cd artifacts
+
+          # Download all release tarballs
+          gh release download "v${VERSION}" \
+            --pattern "*.tar.gz" \
+            --pattern "*.zip" \
+            --repo "${{ github.repository }}"
+
+      - name: Prepare platform packages
+        run: |
+          # Map Rust targets to npm platform names
+          declare -A TARGET_MAP=(
+            ["x86_64-unknown-linux-gnu"]="linux-x64"
+            ["aarch64-unknown-linux-gnu"]="linux-arm64"
+            ["x86_64-apple-darwin"]="darwin-x64"
+            ["aarch64-apple-darwin"]="darwin-arm64"
+            ["x86_64-pc-windows-msvc"]="win32-x64"
+            ["aarch64-pc-windows-msvc"]="win32-arm64"
+          )
+
+          for target in "${!TARGET_MAP[@]}"; do
+            platform="${TARGET_MAP[$target]}"
+            pkg_dir="npm/platforms/${PROJECT_NAME}-${platform}"
+
+            # Skip if platform package doesn't exist
+            [[ -d "$pkg_dir" ]] || continue
+
+            echo "Preparing ${platform}..."
+
+            # Create bin directory
+            mkdir -p "${pkg_dir}/bin"
+
+            # Extract binary from release tarball
+            tarball="artifacts/${PROJECT_NAME}-${VERSION}-${target}.tar.gz"
+            zipfile="artifacts/${PROJECT_NAME}-${VERSION}-${target}.zip"
+
+            if [[ -f "$tarball" ]]; then
+              tar -xzf "$tarball" -C "${pkg_dir}/bin" --strip-components=2 "*/bin/${PROJECT_NAME}"
+              chmod +x "${pkg_dir}/bin/${PROJECT_NAME}"
+            elif [[ -f "$zipfile" ]]; then
+              unzip -j "$zipfile" "bin/${PROJECT_NAME}.exe" -d "${pkg_dir}/bin"
+            else
+              echo "Warning: No artifact found for ${target}"
+              continue
+            fi
+
+            # Update version in package.json
+            jq --arg v "$VERSION" '.version = $v' "${pkg_dir}/package.json" > tmp.json
+            mv tmp.json "${pkg_dir}/package.json"
+
+            echo "✓ Prepared ${platform}"
+          done
+
+      - name: Update main package version
+        run: |
+          main_pkg="npm/${PROJECT_NAME}"
+
+          # Update main package version
+          jq --arg v "$VERSION" '.version = $v' "${main_pkg}/package.json" > tmp.json
+          mv tmp.json "${main_pkg}/package.json"
+
+          # Update optionalDependencies versions
+          jq --arg v "$VERSION" '
+            .optionalDependencies |= with_entries(.value = $v)
+          ' "${main_pkg}/package.json" > tmp.json
+          mv tmp.json "${main_pkg}/package.json"
+
+      - name: Publish platform packages
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          for pkg_dir in npm/platforms/*/; do
+            [[ -d "$pkg_dir" ]] || continue
+
+            # Skip if no binary was added
+            if [[ ! -f "${pkg_dir}bin/${PROJECT_NAME}" && ! -f "${pkg_dir}bin/${PROJECT_NAME}.exe" ]]; then
+              echo "Skipping $(basename "$pkg_dir") - no binary"
+              continue
+            fi
+
+            echo "Publishing $(basename "$pkg_dir")..."
+            cd "$pkg_dir"
+            npm publish --access public || echo "Failed to publish $(basename "$pkg_dir")"
+            cd - > /dev/null
+          done
+
+      - name: Publish main package
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          cd "npm/${PROJECT_NAME}"
+          npm publish --access public
+

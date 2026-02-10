@@ -1,0 +1,52 @@
+# scrat Configuration (YAML format)
+#
+# Copy this file to one of the following locations:
+#   - .scrat.yaml (in your project directory)
+#   - scrat.yaml (in your project directory)
+#   - ~/.config/scrat/config.yaml (user-wide config)
+#
+# Supported formats: TOML, YAML, JSON
+# (use the appropriate extension: .toml, .yaml, .yml, .json)
+#
+# Configuration files are discovered automatically. Project-level configs
+# take precedence over user-level configs. The search stops at repository
+# boundaries (.git directories).
+
+# ------------------------------------------------------------------------------
+# Logging
+# ------------------------------------------------------------------------------
+
+# Minimum log level to display.
+# Values: debug, info, warn, error
+# Default: info
+# Can be overridden with --verbose (-v) or --quiet (-q) flags.
+log_level: info
+
+# Log files are written as JSONL with daily rotation.
+# Default paths:
+# - /var/log/scrat.jsonl (Unix, if writable)
+# - ~/.local/share/scrat/logs/scrat.jsonl (fallback)
+# Override with environment variables:
+# - SCRAT_LOG_PATH=/path/to/scrat.jsonl
+# - SCRAT_LOG_DIR=/path/to/log/dir
+# - SCRAT_ENV=dev
+# Config options:
+# - log_dir: /path/to/log/dir
+# - otel_endpoint: http://127.0.0.1:4317
+
+# ------------------------------------------------------------------------------
+# Add your configuration options below
+# ------------------------------------------------------------------------------
+
+# Example: API endpoint
+# api_url: https://api.example.com
+
+# Example: Feature flags
+# features:
+#   experimental: false
+#   telemetry: true
+
+# Example: Output settings
+# output:
+#   format: text  # text, json, table
+#   color: auto   # auto, always, never

@@ -1,0 +1,4 @@
+#!/usr/bin/env -S just --justfile
+
+default:
+  @just --justfile {{justfile()}} --list

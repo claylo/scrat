@@ -1,0 +1,33 @@
+# Dependabot configuration
+#
+# This enables Dependabot security scanning but does NOT create automatic PRs.
+# Instead, the dependabot-issues.yml workflow converts alerts into issues
+# for manual review and batched updates.
+#
+# See: https://docs.github.com/en/code-security/dependabot/dependabot-alerts
+
+version: 2
+updates:
+  # Rust/Cargo dependencies
+  - package-ecosystem: "cargo"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    # Disable automatic PRs - we use the issues workflow instead
+    open-pull-requests-limit: 0
+    labels:
+      - "dependencies"
+      - "rust"
+
+  # GitHub Actions
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    # Disable automatic PRs - use issues workflow instead
+    open-pull-requests-limit: 0
+    labels:
+      - "dependencies"
+      - "github-actions"

@@ -1,0 +1,67 @@
+[workspace]
+members = ["xtask", "crates/*"]
+default-members = ["crates/*"]
+resolver = "3"
+
+[workspace.package]
+edition = "2024"
+license = "Apache-2.0 OR MIT"
+version = "0.1.0"
+# version we want to allow
+rust-version = "1.88.0"
+readme = "README.md"
+repository = "https://github.com/claylo/scrat"
+homepage = "https://github.com/claylo/scrat"
+documentation = "https://docs.rs/scrat"
+description = "Release management tooling focused on sanity retention"
+keywords = []
+categories = []
+
+[workspace.lints.rust]
+# Use "deny" instead of "forbid" to allow benchmark harnesses to override
+# when their instrumentation machinery requires it (e.g., gungraun's FFI exports)
+unsafe_code = "deny"
+# Encourage documentation - warn on public items missing docs
+missing_docs = "warn"
+[workspace.lints.clippy]
+all = "warn"
+nursery = "warn"
+
+# Optimize dependencies in dev mode for faster tests
+# (keeps main crate unoptimized for fast incremental builds)
+# don't emit debuginfo for *dependencies* in dev builds
+[profile.dev.package."*"]
+debug = 0
+opt-level = 1
+
+[profile.dev.build-override]
+debug = 0
+opt-level = 1
+
+# Reduce debug info size (line tables only, no variable info)
+# Light optimization for better runtime without killing incremental builds
+[profile.dev]
+debug = "line-tables-only"
+opt-level = 1
+# On macOS, keep debug info from exploding into huge scattered dSYM trees
+split-debuginfo = "packed"
+codegen-units = 256 # default, but worth being explicit
+
+# Test profile with full debug symbols for profiling
+[profile.test]
+inherits = "dev"
+codegen-units = 256 # more parallelism = faster compile
+debug = true
+
+# Release profile with reduced debug info for smaller binaries
+[profile.release]
+debug = "line-tables-only"
+
+# Debug-friendly profile for investigating mysteries (hangs, crashes, etc.)
+# Usage: cargo build --profile mystery
+[profile.mystery]
+inherits = "release"
+opt-level = 1
+debug = true
+strip = false
+

@@ -1,0 +1,29 @@
+{
+  "name": "@claylo/scrat",
+  "version": "0.1.0",
+  "description": "Release management tooling focused on sanity retention",
+  "license": "(Apache-2.0 OR MIT)",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/claylo/scrat"
+  },
+  "bin": {
+    "scrat": "cli.js"
+  },
+  "scripts": {
+    "postinstall": "node install.js"
+  },
+  "files": [
+    "index.js",
+    "cli.js",
+    "install.js"
+  ],
+  "optionalDependencies": {
+    "@claylo/scrat-darwin-arm64": "0.1.0",
+    "@claylo/scrat-darwin-x64": "0.1.0",
+    "@claylo/scrat-linux-arm64": "0.1.0",
+    "@claylo/scrat-linux-x64": "0.1.0",
+    "@claylo/scrat-win32-arm64": "0.1.0",
+    "@claylo/scrat-win32-x64": "0.1.0"
+  }
+}

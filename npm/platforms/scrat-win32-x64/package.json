@@ -1,0 +1,13 @@
+{
+  "name": "@claylo/scrat-win32-x64",
+  "version": "0.1.0",
+  "description": "Release management tooling focused on sanity retention (win32-x64 binary)",
+  "license": "(Apache-2.0 OR MIT)",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/claylo/scrat"
+  },
+  "os": ["win32"],
+  "cpu": ["x64"],
+  "files": ["bin/"]
+}

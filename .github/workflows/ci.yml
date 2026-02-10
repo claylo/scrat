@@ -1,0 +1,133 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  lint:
+    name: lint
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.1
+
+      - name: Rust toolchain
+        uses: dtolnay/rust-toolchain@e97e2d8cc328f1b50210efc529dca0028893a2d9 # v1
+        with:
+          toolchain: stable
+          components: rustfmt, clippy
+
+      - name: Rust cache
+        uses: ./.github/actions/setup-rust-cache
+        with:
+          cache-key-suffix: lint
+          toolchain: stable
+
+      - name: rustfmt
+        run: cargo fmt --check
+
+      - name: clippy
+        run: cargo clippy --all-targets --all-features -- -D warnings
+
+  test:
+    name: test
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.1
+
+      - name: Rust toolchain
+        uses: dtolnay/rust-toolchain@e97e2d8cc328f1b50210efc529dca0028893a2d9 # v1
+        with:
+          toolchain: stable
+
+      - name: Rust cache
+        uses: ./.github/actions/setup-rust-cache
+        with:
+          cache-key-suffix: test
+          toolchain: stable
+
+      - name: Install nextest
+        uses: ./.github/actions/setup-cargo-tools
+        with:
+          binstall-tools: cargo-nextest
+
+      - name: nextest
+        run: cargo nextest run --profile ci
+
+      - name: doctests
+        run: cargo test --doc
+
+  deny:
+    name: cargo-deny
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.1
+
+      - name: Check dependencies
+        uses: EmbarkStudios/cargo-deny-action@3fd3802e88374d3fe9159b834c7714ec57d6c979 # v2.0.15
+
+  msrv:
+    name: msrv
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.1
+
+      - name: Read MSRV
+        id: msrv
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ ! -f Cargo.toml ]; then
+            echo "found=false" >>"$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          msrv="$(awk -F= '
+            /^[[:space:]]*rust-version[[:space:]]*=/ {
+              v=$2
+              gsub(/^[[:space:]]+|[[:space:]]+$/, "", v)
+              gsub(/"/, "", v)
+              print v
+              exit
+            }
+          ' Cargo.toml || true)"
+
+          if [ -z "${msrv}" ]; then
+            echo "found=false" >>"$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          echo "found=true" >>"$GITHUB_OUTPUT"
+          echo "msrv=${msrv}" >>"$GITHUB_OUTPUT"
+
+      - name: Rust toolchain (MSRV)
+        if: steps.msrv.outputs.found == 'true'
+        uses: dtolnay/rust-toolchain@e97e2d8cc328f1b50210efc529dca0028893a2d9 # v1
+        with:
+          toolchain: ${{ steps.msrv.outputs.msrv }}
+
+      - name: Rust cache
+        if: steps.msrv.outputs.found == 'true'
+        uses: ./.github/actions/setup-rust-cache
+        with:
+          cache-key-suffix: msrv
+          toolchain: ${{ steps.msrv.outputs.msrv }}
+
+      - name: cargo check (MSRV)
+        if: steps.msrv.outputs.found == 'true'
+        run: cargo check --all-targets --all-features
+

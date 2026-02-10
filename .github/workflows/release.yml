@@ -1,0 +1,118 @@
+# Automatic release workflow
+# Creates a release tag when releasable commits are merged to main
+#
+# Repo variables:
+#   AUTO_RELEASE_ENABLED: set to 'true' to enable automatic releases
+#   AUTO_RELEASE_DRY_RUN: set to 'true' to log what would happen without creating tags
+
+name: Release
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Dry run (log only, don't create tags)"
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  check-release:
+    name: Check for release
+    if: vars.AUTO_RELEASE_ENABLED == 'true'
+    runs-on: ubuntu-latest
+    outputs:
+      should_release: ${{ steps.check.outputs.should_release }}
+      next_version: ${{ steps.check.outputs.next_version }}
+      changelog: ${{ steps.changelog.outputs.content }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.1
+        with:
+          fetch-depth: 0
+
+      - name: Get latest tag
+        id: latest_tag
+        run: |
+          tag=$(git describe --tags --abbrev=0 2>/dev/null || echo "v0.0.0")
+          echo "tag=${tag}" >> $GITHUB_OUTPUT
+
+      - name: Check for releasable commits
+        id: check
+        run: |
+          # Install git-cliff
+          cargo install git-cliff
+
+          # Get the bumped version from git-cliff
+          next_version=$(git cliff --bumped-version 2>/dev/null || echo "")
+
+          if [ -z "$next_version" ]; then
+            echo "No version bump detected"
+            echo "should_release=false" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+
+          current_tag="${{ steps.latest_tag.outputs.tag }}"
+          if [ "$next_version" = "$current_tag" ]; then
+            echo "Already at version $next_version"
+            echo "should_release=false" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+
+          echo "Will release: $current_tag -> $next_version"
+          echo "should_release=true" >> $GITHUB_OUTPUT
+          echo "next_version=${next_version}" >> $GITHUB_OUTPUT
+
+      - name: Generate changelog
+        if: steps.check.outputs.should_release == 'true'
+        uses: orhun/git-cliff-action@e16f179f0be49ecdfe63753837f20b9531642772 # v4.7.0
+        id: changelog
+        with:
+          config: cliff.toml
+          args: -vv --unreleased --strip all
+
+  create-release:
+    name: Create release
+    needs: check-release
+    if: needs.check-release.outputs.should_release == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.1
+        with:
+          fetch-depth: 0
+
+      - name: Configure git
+        uses: ./.github/actions/bot-setup
+
+      - name: Dry run
+        if: inputs.dry_run == true || vars.AUTO_RELEASE_DRY_RUN == 'true'
+        run: |
+          echo "=== DRY RUN ==="
+          echo "Would create tag: ${{ needs.check-release.outputs.next_version }}"
+          echo ""
+          echo "Changelog:"
+          echo "${{ needs.check-release.outputs.changelog }}"
+
+      - name: Create and push tag
+        if: inputs.dry_run != true && vars.AUTO_RELEASE_DRY_RUN != 'true'
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          version="${{ needs.check-release.outputs.next_version }}"
+          echo "Creating tag: ${version}"
+
+          git tag -a "${version}" -m "Release ${version}"
+          git push origin "${version}"
+
+          echo "✅ Tag ${version} created and pushed"
+          echo "The CD workflow will now build and publish the release."
+

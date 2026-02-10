@@ -1,0 +1,2 @@
+# We use rustfmt's default settings to format the source code
+# This file intentionally exists so rustfmt stops searching parent directories for config.

@@ -1,0 +1,104 @@
+# git-cliff configuration
+# https://git-cliff.org/docs/configuration
+
+[changelog]
+# Changelog header
+header = """
+# Changelog
+
+All notable changes to this project will be documented in this file.
+
+"""
+# Template for the changelog body
+body = """
+{%- macro remote_url() -%}
+  https://github.com/claylo/scrat
+{%- endmacro -%}
+
+{% if version -%}
+    ## [{{ version | trim_start_matches(pat="v") }}] - {{ timestamp | date(format="%Y-%m-%d") }}
+{% else -%}
+    ## [Unreleased]
+{% endif -%}
+
+{% for group, commits in commits | group_by(attribute="group") %}
+    ### {{ group | striptags | trim | upper_first }}
+    {% for commit in commits %}
+        - {% if commit.scope %}*({{ commit.scope }})* {% endif %}\
+            {% if commit.breaking %}[**breaking**] {% endif %}\
+            {{ commit.message | upper_first }}\
+            {% if commit.github.username %} by @{{ commit.github.username }}{%- endif -%}
+            {% if commit.github.pr_number %} in \
+              [#{{ commit.github.pr_number }}]({{ self::remote_url() }}/pull/{{ commit.github.pr_number }}) \
+            {%- endif -%}
+    {% endfor %}
+{% endfor %}
+
+{%- if github.contributors | filter(attribute="is_first_time", value=true) | length != 0 %}
+  ### New Contributors
+{%- endif -%}
+
+{% for contributor in github.contributors | filter(attribute="is_first_time", value=true) %}
+  * @{{ contributor.username }} made their first contribution
+    {%- if contributor.pr_number %} in \
+      [#{{ contributor.pr_number }}]({{ self::remote_url() }}/pull/{{ contributor.pr_number }}) \
+    {%- endif %}
+{%- endfor %}
+
+{% if version %}
+    {% if previous.version %}
+      **Full Changelog**: [{{ previous.version }}...{{ version }}]({{ self::remote_url() }}/compare/{{ previous.version }}...{{ version }})
+    {% endif %}
+{% else %}
+    **Full Changelog**: {{ self::remote_url() }}/commits/HEAD
+{% endif %}
+
+"""
+# Remove leading and trailing whitespace
+trim = true
+# Changelog footer
+footer = ""
+
+[git]
+# Parse conventional commits
+conventional_commits = true
+# Filter out unconventional commits
+filter_unconventional = true
+# Process each line of a commit as an individual commit
+split_commits = false
+
+# Regex for parsing commits
+commit_parsers = [
+  { message = "^feat", group = "<!-- 0 -->Features" },
+  { message = "^fix", group = "<!-- 1 -->Bug Fixes" },
+  { message = "^doc", group = "<!-- 2 -->Documentation" },
+  { message = "^perf", group = "<!-- 3 -->Performance" },
+  { message = "^refactor", group = "<!-- 4 -->Refactor" },
+  { message = "^style", group = "<!-- 5 -->Styling" },
+  { message = "^test", group = "<!-- 6 -->Testing" },
+  { message = "^chore\\(release\\)", skip = true },
+  { message = "^chore\\(deps.*\\)", skip = true },
+  { message = "^chore\\(pr\\)", skip = true },
+  { message = "^chore\\(pull\\)", skip = true },
+  { message = "^chore|^ci", group = "<!-- 7 -->Miscellaneous Tasks" },
+  { body = ".*security", group = "<!-- 8 -->Security" },
+  { message = "^revert", group = "<!-- 9 -->Revert" },
+]
+# Protect breaking changes from being skipped
+protect_breaking_commits = false
+# Filter out commits by pattern
+filter_commits = false
+# Regex for matching git tags
+tag_pattern = "v[0-9].*"
+# Regex for skipping tags
+skip_tags = ""
+# Regex for ignoring tags
+ignore_tags = ""
+# Sort commits inside sections by date
+date_order = false
+# Sort commits inside sections by value
+sort_commits = "oldest"
+
+[remote.github]
+owner = "claylo"
+repo = "scrat"
