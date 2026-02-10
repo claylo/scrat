@@ -95,6 +95,12 @@ pub enum Commands {
 
     /// Show package information
     Info(commands::info::InfoArgs),
+
+    /// Check release readiness
+    Preflight(commands::preflight::PreflightArgs),
+
+    /// Determine next version and update project files
+    Bump(commands::bump::BumpArgs),
 }
 
 /// Returns the clap command for documentation generation

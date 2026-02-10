@@ -60,6 +60,8 @@ pub struct Config {
     pub commands: Option<CommandsConfig>,
     /// Release workflow configuration.
     pub release: Option<ReleaseConfig>,
+    /// Hook commands per release phase.
+    pub hooks: Option<HooksConfig>,
 }
 
 /// Project-level configuration overrides.
@@ -109,19 +111,46 @@ pub struct ReleaseConfig {
     pub changelog_tool: Option<ChangelogTool>,
     /// Whether to create a GitHub release (default: `true`).
     pub github_release: Option<bool>,
-    /// Whether to generate a release postcard image (default: `false`).
-    pub postcard: Option<bool>,
-    /// Release notes sub-configuration.
-    pub notes: Option<ReleaseNotesConfig>,
+    /// File paths to attach to the GitHub release as assets.
+    ///
+    /// Hook commands produce these files; scrat attaches them.
+    /// Paths are relative to the project root.
+    pub assets: Option<Vec<String>>,
 }
 
-/// Release notes template configuration.
+/// Hook commands to run at each phase of the release workflow.
+///
+/// Each hook is a list of shell commands executed in order. Commands
+/// support variable interpolation:
+/// - `{version}` — the new version (e.g., `1.2.3`)
+/// - `{prev_version}` — the previous version
+/// - `{tag}` — the git tag (e.g., `v1.2.3`)
+/// - `{changelog_path}` — path to the generated CHANGELOG
+/// - `{owner}` — the repository owner (from git remote)
+/// - `{repo}` — the repository name (from git remote)
+///
+/// # Example
+///
+/// ```toml
+/// [hooks]
+/// post_bump = [
+///     "ll-graphics generate --version {version} --output release-card.png",
+/// ]
+/// ```
 #[derive(Debug, Clone, Default, Deserialize, Serialize, PartialEq, Eq)]
-pub struct ReleaseNotesConfig {
-    /// Path to a custom release notes template.
-    pub template: Option<Utf8PathBuf>,
-    /// Path to a quote corpus JSONL file.
-    pub quote_corpus: Option<Utf8PathBuf>,
+pub struct HooksConfig {
+    /// Commands to run before bumping the version.
+    pub pre_bump: Option<Vec<String>>,
+    /// Commands to run after bumping the version and generating the changelog.
+    pub post_bump: Option<Vec<String>>,
+    /// Commands to run before publishing to a registry.
+    pub pre_publish: Option<Vec<String>>,
+    /// Commands to run after publishing.
+    pub post_publish: Option<Vec<String>>,
+    /// Commands to run before creating the git tag.
+    pub pre_tag: Option<Vec<String>>,
+    /// Commands to run after pushing tags (before GitHub release).
+    pub post_tag: Option<Vec<String>>,
 }
 
 /// Log level configuration.
@@ -665,7 +694,7 @@ build = "cargo build --release"
 [release]
 changelog_tool = "git-cliff"
 github_release = true
-postcard = false
+assets = ["release-card.png", "checksums.txt"]
 "#,
         )
         .unwrap();
@@ -683,7 +712,43 @@ postcard = false
             Some(crate::ecosystem::ChangelogTool::GitCliff)
         );
         assert_eq!(release.github_release, Some(true));
-        assert_eq!(release.postcard, Some(false));
+        assert_eq!(
+            release.assets,
+            Some(vec![
+                "release-card.png".to_string(),
+                "checksums.txt".to_string()
+            ])
+        );
+    }
+
+    #[test]
+    fn test_config_with_hooks_section() {
+        let tmp = TempDir::new().unwrap();
+        let config_path = tmp.path().join("config.toml");
+        fs::write(
+            &config_path,
+            r#"
+[hooks]
+post_bump = ["echo {version}", "ll-graphics --version {version}"]
+pre_publish = ["cargo build --release"]
+"#,
+        )
+        .unwrap();
+
+        let config_path = Utf8PathBuf::try_from(config_path).unwrap();
+        let config = ConfigLoader::new()
+            .with_user_config(false)
+            .with_file(&config_path)
+            .load()
+            .unwrap();
+
+        let hooks = config.hooks.unwrap();
+        assert_eq!(hooks.post_bump.as_ref().unwrap().len(), 2);
+        assert_eq!(
+            hooks.pre_publish.as_ref().unwrap(),
+            &["cargo build --release"]
+        );
+        assert!(hooks.pre_bump.is_none());
     }
 
     #[test]

@@ -5,10 +5,14 @@
 //!
 //! # Modules
 //!
+//! - [`bump`] - Version bump execution (file updates, changelog)
 //! - [`config`] - Configuration loading and management
 //! - [`detect`] - Project ecosystem and tool detection
 //! - [`ecosystem`] - Ecosystem types and smart defaults
 //! - [`error`] - Error types and result aliases
+//! - [`git`] - Git operations for release workflows
+//! - [`preflight`] - Release readiness checks
+//! - [`version`] - Version determination and computation
 //!
 //! # Quick Start
 //!
@@ -24,6 +28,8 @@
 //! ```
 #![deny(unsafe_code)]
 
+pub mod bump;
+
 pub mod config;
 
 pub mod detect;
@@ -32,6 +38,15 @@ pub mod ecosystem;
 
 pub mod error;
 
+pub mod git;
+
+pub mod preflight;
+
+pub mod version;
+
 pub use config::{Config, ConfigLoader, LogLevel};
 
 pub use error::{ConfigError, ConfigResult};
+
+// Re-export semver so downstream crates don't need a direct dependency.
+pub use semver;
