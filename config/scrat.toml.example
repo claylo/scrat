@@ -69,14 +69,40 @@ log_level = "info"
 # assets = ["release-card.png", "checksums.txt"]
 
 # ------------------------------------------------------------------------------
-# Hooks (cog-style pre/post commands per phase)
+# Hooks (pre/post commands per phase of `scrat ship`)
 # ------------------------------------------------------------------------------
 # Variables: {version}, {prev_version}, {tag}, {changelog_path}, {owner}, {repo}
+#
+# Commands run in parallel by default. Prefix with "sync:" to create a
+# barrier — all prior commands finish, the sync command runs alone, then
+# subsequent commands resume in parallel.
+#
+# Phase order:
+#   pre_ship → test → bump → publish → git → release → post_ship
 
 # [hooks]
+# # Bracket the entire ship workflow
+# pre_ship = ["echo 'Starting release...'"]
+# post_ship = ["echo 'Release complete!'"]
+#
+# # Before/after test phase
+# pre_test = ["echo 'Preparing tests...'"]
+# post_test = ["echo 'Tests passed!'"]
+#
+# # Before/after version bump + changelog
+# pre_bump = ["echo 'Pre-bump tasks...'"]
 # post_bump = [
 #     "ll-graphics generate --version {version} --output release-card.png",
 # ]
-# pre_publish = [
-#     "cargo build --release",
-# ]
+#
+# # Before/after publishing to registry
+# pre_publish = ["cargo build --release"]
+# post_publish = ["echo 'Published {version}!'"]
+#
+# # Before/after git commit + tag + push
+# pre_tag = ["echo 'Preparing tag {tag}...'"]
+# post_tag = ["echo 'Pushed {tag}'"]
+#
+# # Before/after GitHub release creation
+# pre_release = ["sync:echo 'Creating release...'"]
+# post_release = ["echo 'Released {owner}/{repo}@{tag}'"]

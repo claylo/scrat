@@ -11,7 +11,9 @@
 //! - [`ecosystem`] - Ecosystem types and smart defaults
 //! - [`error`] - Error types and result aliases
 //! - [`git`] - Git operations for release workflows
+//! - [`hooks`] - Hook executor for shell commands at phase boundaries
 //! - [`preflight`] - Release readiness checks
+//! - [`ship`] - Ship orchestrator (full release workflow)
 //! - [`version`] - Version determination and computation
 //!
 //! # Quick Start
@@ -40,7 +42,11 @@ pub mod error;
 
 pub mod git;
 
+pub mod hooks;
+
 pub mod preflight;
+
+pub mod ship;
 
 pub mod version;
 

@@ -16,6 +16,7 @@
 //! and shell completions via `xtask`.
 
 pub mod commands;
+pub mod terminal;
 
 use clap::{CommandFactory, Parser, Subcommand};
 use std::path::PathBuf;
@@ -101,6 +102,9 @@ pub enum Commands {
 
     /// Determine next version and update project files
     Bump(commands::bump::BumpArgs),
+
+    /// Run the full release workflow
+    Ship(commands::ship::ShipArgs),
 }
 
 /// Returns the clap command for documentation generation

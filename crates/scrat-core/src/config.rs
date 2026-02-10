@@ -129,6 +129,10 @@ pub struct ReleaseConfig {
 /// - `{owner}` — the repository owner (from git remote)
 /// - `{repo}` — the repository name (from git remote)
 ///
+/// Commands run in parallel by default. Prefix a command with `sync:`
+/// to create a barrier — all prior commands must finish, the sync
+/// command runs alone, then subsequent commands resume in parallel.
+///
 /// # Example
 ///
 /// ```toml
@@ -139,6 +143,14 @@ pub struct ReleaseConfig {
 /// ```
 #[derive(Debug, Clone, Default, Deserialize, Serialize, PartialEq, Eq)]
 pub struct HooksConfig {
+    /// Commands to run before the entire ship workflow.
+    pub pre_ship: Option<Vec<String>>,
+    /// Commands to run after the entire ship workflow completes.
+    pub post_ship: Option<Vec<String>>,
+    /// Commands to run before the test phase.
+    pub pre_test: Option<Vec<String>>,
+    /// Commands to run after tests pass.
+    pub post_test: Option<Vec<String>>,
     /// Commands to run before bumping the version.
     pub pre_bump: Option<Vec<String>>,
     /// Commands to run after bumping the version and generating the changelog.
@@ -149,8 +161,12 @@ pub struct HooksConfig {
     pub post_publish: Option<Vec<String>>,
     /// Commands to run before creating the git tag.
     pub pre_tag: Option<Vec<String>>,
-    /// Commands to run after pushing tags (before GitHub release).
+    /// Commands to run after pushing tags.
     pub post_tag: Option<Vec<String>>,
+    /// Commands to run before creating a GitHub release.
+    pub pre_release: Option<Vec<String>>,
+    /// Commands to run after the GitHub release is created.
+    pub post_release: Option<Vec<String>>,
 }
 
 /// Log level configuration.
@@ -749,6 +765,52 @@ pre_publish = ["cargo build --release"]
             &["cargo build --release"]
         );
         assert!(hooks.pre_bump.is_none());
+    }
+
+    #[test]
+    fn test_config_with_all_hook_phases() {
+        let tmp = TempDir::new().unwrap();
+        let config_path = tmp.path().join("config.toml");
+        fs::write(
+            &config_path,
+            r#"
+[hooks]
+pre_ship = ["echo starting"]
+post_ship = ["echo done"]
+pre_test = ["echo pre-test"]
+post_test = ["echo post-test"]
+pre_bump = ["echo pre-bump"]
+post_bump = ["echo post-bump"]
+pre_publish = ["echo pre-publish"]
+post_publish = ["echo post-publish"]
+pre_tag = ["echo pre-tag"]
+post_tag = ["echo post-tag"]
+pre_release = ["echo pre-release"]
+post_release = ["echo post-release"]
+"#,
+        )
+        .unwrap();
+
+        let config_path = Utf8PathBuf::try_from(config_path).unwrap();
+        let config = ConfigLoader::new()
+            .with_user_config(false)
+            .with_file(&config_path)
+            .load()
+            .unwrap();
+
+        let hooks = config.hooks.unwrap();
+        assert!(hooks.pre_ship.is_some());
+        assert!(hooks.post_ship.is_some());
+        assert!(hooks.pre_test.is_some());
+        assert!(hooks.post_test.is_some());
+        assert!(hooks.pre_bump.is_some());
+        assert!(hooks.post_bump.is_some());
+        assert!(hooks.pre_publish.is_some());
+        assert!(hooks.post_publish.is_some());
+        assert!(hooks.pre_tag.is_some());
+        assert!(hooks.post_tag.is_some());
+        assert!(hooks.pre_release.is_some());
+        assert!(hooks.post_release.is_some());
     }
 
     #[test]
