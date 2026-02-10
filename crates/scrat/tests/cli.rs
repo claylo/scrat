@@ -195,3 +195,32 @@ fn chdir_nonexistent_fails() {
         .assert()
         .failure();
 }
+
+// =============================================================================
+// Ship Command
+// =============================================================================
+
+#[test]
+fn ship_help_shows_usage() {
+    cmd()
+        .args(["ship", "--help"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Run the full release workflow"))
+        .stdout(predicate::str::contains("--dry-run"))
+        .stdout(predicate::str::contains("--no-publish"))
+        .stdout(predicate::str::contains("--no-push"))
+        .stdout(predicate::str::contains("--no-release"))
+        .stdout(predicate::str::contains("--skip-tests"))
+        .stdout(predicate::str::contains("--no-changelog"))
+        .stdout(predicate::str::contains("--version"));
+}
+
+#[test]
+fn ship_shows_in_subcommand_list() {
+    cmd()
+        .arg("--help")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("ship"));
+}

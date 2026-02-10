@@ -99,6 +99,9 @@ pub fn cmd_info(
     if global_json {
         println!("{}", serde_json::to_string_pretty(&full_info)?);
     } else {
+        if !crate::terminal::render_shipit() {
+            println!("  {}", ":shipit:".bold());
+        }
         println!(
             "{} {}",
             full_info.package.name.bold(),

@@ -192,6 +192,133 @@ pub fn parse_owner_repo(url: &str) -> Option<(String, String)> {
     Some((owner.to_string(), repo.to_string()))
 }
 
+/// Statistics about changes since a given ref.
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct GitStats {
+    /// Number of commits since the ref.
+    pub commit_count: usize,
+    /// Number of files changed.
+    pub files_changed: usize,
+    /// Total lines inserted.
+    pub insertions: usize,
+    /// Total lines deleted.
+    pub deletions: usize,
+}
+
+/// Stage files and create a commit.
+///
+/// Returns the new commit hash.
+#[instrument(skip(message))]
+pub fn commit(files: &[&str], message: &str) -> GitResult<String> {
+    // Stage files
+    let mut args = vec!["add", "--"];
+    args.extend_from_slice(files);
+    git(&args)?;
+
+    // Create the commit
+    git(&["commit", "-m", message])?;
+
+    // Return the new commit hash
+    let hash = git(&["rev-parse", "--short", "HEAD"])?.trim().to_string();
+    debug!(%hash, "created commit");
+    Ok(hash)
+}
+
+/// Create an annotated tag.
+#[instrument]
+pub fn create_tag(name: &str, message: &str) -> GitResult<()> {
+    git(&["tag", "-a", name, "-m", message])?;
+    debug!(%name, "created tag");
+    Ok(())
+}
+
+/// Push branch and optionally tags to a remote.
+#[instrument]
+pub fn push(remote: &str, branch: &str, push_tags: bool) -> GitResult<()> {
+    git(&["push", remote, branch])?;
+    if push_tags {
+        git(&["push", remote, "--tags"])?;
+    }
+    debug!(%remote, %branch, push_tags, "pushed");
+    Ok(())
+}
+
+/// Get statistics since a ref: commit count, files changed, insertions, deletions.
+#[instrument]
+pub fn stats_since(since: &str) -> GitResult<GitStats> {
+    // Count commits
+    let log_output = git(&["log", &format!("{since}..HEAD"), "--oneline"])?;
+    let commit_count = log_output.lines().filter(|l| !l.is_empty()).count();
+
+    // Get diff stats
+    let diff_output = git(&["diff", "--stat", since])?;
+    let (files_changed, insertions, deletions) = parse_diff_stat(&diff_output);
+
+    let stats = GitStats {
+        commit_count,
+        files_changed,
+        insertions,
+        deletions,
+    };
+    debug!(?stats, "stats since {since}");
+    Ok(stats)
+}
+
+/// Get top contributors since a ref.
+///
+/// Returns `(name, commit_count)` tuples sorted by count descending.
+#[instrument]
+pub fn contributors_since(since: &str, limit: usize) -> GitResult<Vec<(String, usize)>> {
+    let output = git(&["shortlog", "-sn", "--no-merges", &format!("{since}..HEAD")])?;
+
+    let contributors: Vec<(String, usize)> = output
+        .lines()
+        .filter(|l| !l.is_empty())
+        .take(limit)
+        .filter_map(|line| {
+            let line = line.trim();
+            let (count_str, name) = line.split_once('\t').or_else(|| line.split_once(' '))?;
+            let count = count_str.trim().parse().ok()?;
+            Some((name.trim().to_string(), count))
+        })
+        .collect();
+
+    debug!(count = contributors.len(), "contributors since {since}");
+    Ok(contributors)
+}
+
+/// Parse the summary line from `git diff --stat`.
+///
+/// Example: ` 3 files changed, 42 insertions(+), 10 deletions(-)`
+fn parse_diff_stat(output: &str) -> (usize, usize, usize) {
+    let Some(summary) = output.lines().last() else {
+        return (0, 0, 0);
+    };
+
+    let mut files = 0;
+    let mut insertions = 0;
+    let mut deletions = 0;
+
+    for part in summary.split(',') {
+        let part = part.trim();
+        let n = part
+            .split_whitespace()
+            .next()
+            .and_then(|s| s.parse().ok())
+            .unwrap_or(0);
+
+        if part.contains("file") {
+            files = n;
+        } else if part.contains("insertion") {
+            insertions = n;
+        } else if part.contains("deletion") {
+            deletions = n;
+        }
+    }
+
+    (files, insertions, deletions)
+}
+
 /// Check if we're inside a git repository.
 #[instrument]
 pub fn is_inside_repo() -> GitResult<bool> {
@@ -329,5 +456,43 @@ mod tests {
     fn parse_owner_repo_invalid() {
         assert!(parse_owner_repo("not-a-url").is_none());
         assert!(parse_owner_repo("").is_none());
+    }
+
+    #[test]
+    fn parse_diff_stat_full_line() {
+        let output = " file1.rs | 10 +++\n file2.rs | 5 ---\n 2 files changed, 10 insertions(+), 5 deletions(-)\n";
+        let (files, ins, del) = parse_diff_stat(output);
+        assert_eq!(files, 2);
+        assert_eq!(ins, 10);
+        assert_eq!(del, 5);
+    }
+
+    #[test]
+    fn parse_diff_stat_insertions_only() {
+        let output = " 1 file changed, 42 insertions(+)\n";
+        let (files, ins, del) = parse_diff_stat(output);
+        assert_eq!(files, 1);
+        assert_eq!(ins, 42);
+        assert_eq!(del, 0);
+    }
+
+    #[test]
+    fn parse_diff_stat_empty() {
+        let (files, ins, del) = parse_diff_stat("");
+        assert_eq!(files, 0);
+        assert_eq!(ins, 0);
+        assert_eq!(del, 0);
+    }
+
+    #[test]
+    fn git_stats_serializes() {
+        let stats = GitStats {
+            commit_count: 5,
+            files_changed: 3,
+            insertions: 42,
+            deletions: 10,
+        };
+        let json = serde_json::to_string(&stats).unwrap();
+        assert!(json.contains("\"commit_count\":5"));
     }
 }

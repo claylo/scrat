@@ -10,7 +10,16 @@ use tracing::debug;
 mod observability;
 
 fn main() -> anyhow::Result<()> {
-    let cli = Cli::parse();
+    // Intercept --version to render the :shipit: squirrel before the version string.
+    let cli = match Cli::try_parse() {
+        Ok(cli) => cli,
+        Err(e) if e.kind() == clap::error::ErrorKind::DisplayVersion => {
+            scrat::terminal::render_shipit();
+            e.print().expect("failed to write version");
+            return Ok(());
+        }
+        Err(e) => e.exit(),
+    };
     cli.color.apply();
 
     if let Some(ref dir) = cli.chdir {
@@ -64,6 +73,7 @@ fn main() -> anyhow::Result<()> {
             commands::preflight::cmd_preflight(args, cli.json, &config, &cwd)
         }
         Commands::Bump(args) => commands::bump::cmd_bump(args, cli.json, &config, &cwd),
+        Commands::Ship(args) => commands::ship::cmd_ship(args, cli.json, &config, &cwd),
     };
     if let Err(ref err) = result {
         tracing::error!(error = %err, "fatal error");
