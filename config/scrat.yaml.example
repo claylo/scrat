@@ -71,6 +71,14 @@ log_level: info
 #     - checksums.txt
 
 # ------------------------------------------------------------------------------
+# Ship Command Behavior
+# ------------------------------------------------------------------------------
+
+# ship:
+#   confirm: true   # Prompt before executing (default: true)
+#                    # Set to false for CI/scripted use, or use --yes/-y flag
+
+# ------------------------------------------------------------------------------
 # Hooks (cog-style pre/post commands per phase)
 # ------------------------------------------------------------------------------
 # Variables: {version}, {prev_version}, {tag}, {changelog_path}, {owner}, {repo}

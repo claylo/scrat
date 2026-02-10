@@ -69,6 +69,14 @@ log_level = "info"
 # assets = ["release-card.png", "checksums.txt"]
 
 # ------------------------------------------------------------------------------
+# Ship Command Behavior
+# ------------------------------------------------------------------------------
+
+# [ship]
+# confirm = true   # Prompt before executing (default: true)
+#                   # Set to false for CI/scripted use, or use --yes/-y flag
+
+# ------------------------------------------------------------------------------
 # Hooks (pre/post commands per phase of `scrat ship`)
 # ------------------------------------------------------------------------------
 # Variables: {version}, {prev_version}, {tag}, {changelog_path}, {owner}, {repo}
