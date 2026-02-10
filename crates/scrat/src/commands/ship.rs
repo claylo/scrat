@@ -33,6 +33,10 @@ pub struct ShipArgs {
     #[arg(long)]
     pub no_release: bool,
 
+    /// Skip dependency diff
+    #[arg(long)]
+    pub no_deps: bool,
+
     /// Skip running tests
     #[arg(long)]
     pub skip_tests: bool,
@@ -68,6 +72,7 @@ pub fn cmd_ship(
         no_publish: args.no_publish,
         no_push: args.no_push,
         no_release: args.no_release,
+        no_deps: args.no_deps,
         dry_run: args.dry_run,
         skip_tests: args.skip_tests,
     };

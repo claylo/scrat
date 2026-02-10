@@ -24,6 +24,7 @@ use tracing::{debug, info, instrument};
 
 use crate::bump::{self, InteractiveBump, ReadyBump};
 use crate::config::Config;
+use crate::deps;
 use crate::ecosystem::ProjectDetection;
 use crate::git;
 use crate::hooks::{self, HookContext};
@@ -87,6 +88,8 @@ pub struct ShipOptions {
     pub no_push: bool,
     /// Skip GitHub release creation.
     pub no_release: bool,
+    /// Skip dependency diff computation.
+    pub no_deps: bool,
     /// Preview what would happen without making changes.
     pub dry_run: bool,
     /// Skip running tests.
@@ -345,6 +348,11 @@ impl ReadyShip {
         // Load release assets from config
         if let Some(assets) = self.config.release.as_ref().and_then(|r| r.assets.clone()) {
             ctx.set_assets(assets);
+        }
+
+        // Deps diff (silent data-gathering, populates context)
+        if !self.options.no_deps {
+            ctx.dependencies = deps::compute_deps(self.detection.ecosystem, &ctx.previous_tag);
         }
 
         // Derive hook interpolation context
@@ -959,6 +967,7 @@ mod tests {
         assert!(!opts.no_publish);
         assert!(!opts.no_push);
         assert!(!opts.no_release);
+        assert!(!opts.no_deps);
         assert!(!opts.skip_tests);
         assert!(!opts.no_changelog);
         assert!(opts.explicit_version.is_none());

@@ -7,6 +7,7 @@
 //!
 //! - [`bump`] - Version bump execution (file updates, changelog)
 //! - [`config`] - Configuration loading and management
+//! - [`deps`] - Dependency diff from lockfile changes
 //! - [`detect`] - Project ecosystem and tool detection
 //! - [`ecosystem`] - Ecosystem types and smart defaults
 //! - [`error`] - Error types and result aliases
@@ -34,6 +35,8 @@
 pub mod bump;
 
 pub mod config;
+
+pub mod deps;
 
 pub mod detect;
 
