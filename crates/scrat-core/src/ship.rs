@@ -30,6 +30,7 @@ use crate::git;
 use crate::hooks::{self, HookContext};
 use crate::pipeline::{PipelineContext, PipelineContextInit};
 use crate::preflight;
+use crate::stats;
 
 // ──────────────────────────────────────────────
 // Errors
@@ -90,6 +91,8 @@ pub struct ShipOptions {
     pub no_release: bool,
     /// Skip dependency diff computation.
     pub no_deps: bool,
+    /// Skip release statistics collection.
+    pub no_stats: bool,
     /// Preview what would happen without making changes.
     pub dry_run: bool,
     /// Skip running tests.
@@ -353,6 +356,11 @@ impl ReadyShip {
         // Deps diff (silent data-gathering, populates context)
         if !self.options.no_deps {
             ctx.dependencies = deps::compute_deps(self.detection.ecosystem, &ctx.previous_tag);
+        }
+
+        // Stats collection (silent data-gathering, populates context)
+        if !self.options.no_stats {
+            ctx.stats = stats::compute_stats(&ctx.previous_tag);
         }
 
         // Derive hook interpolation context
@@ -968,6 +976,7 @@ mod tests {
         assert!(!opts.no_push);
         assert!(!opts.no_release);
         assert!(!opts.no_deps);
+        assert!(!opts.no_stats);
         assert!(!opts.skip_tests);
         assert!(!opts.no_changelog);
         assert!(opts.explicit_version.is_none());
