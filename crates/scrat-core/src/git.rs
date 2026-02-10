@@ -192,6 +192,30 @@ pub fn parse_owner_repo(url: &str) -> Option<(String, String)> {
     Some((owner.to_string(), repo.to_string()))
 }
 
+/// Get the unified diff for a specific file between a ref and HEAD.
+///
+/// Returns an empty string if the file doesn't exist in either ref
+/// or has no changes.
+#[instrument]
+pub fn diff_file(since: &str, path: &str) -> GitResult<String> {
+    let range = format!("{since}..HEAD");
+    let result = git(&["diff", &range, "--", path]);
+    match result {
+        Ok(output) => {
+            debug!(path, bytes = output.len(), "diff_file");
+            Ok(output)
+        }
+        Err(GitError::Command { .. }) => {
+            debug!(
+                path,
+                "diff_file: no diff (command error, treating as empty)"
+            );
+            Ok(String::new())
+        }
+        Err(e) => Err(e),
+    }
+}
+
 /// Statistics about changes since a given ref.
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct GitStats {
@@ -410,6 +434,16 @@ mod tests {
         if is_inside_repo().unwrap_or(false) {
             let result = recent_commits(None, 5);
             assert!(result.is_ok());
+        }
+    }
+
+    #[test]
+    fn diff_file_nonexistent() {
+        if is_inside_repo().unwrap_or(false) {
+            // A file that doesn't exist should produce an empty diff, not an error
+            let result = diff_file("HEAD", "this-file-does-not-exist-at-all.xyz");
+            assert!(result.is_ok());
+            assert!(result.unwrap().is_empty());
         }
     }
 

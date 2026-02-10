@@ -35,6 +35,14 @@ impl Ecosystem {
         }
     }
 
+    /// Primary lockfile for this ecosystem, relative to project root.
+    pub const fn lockfile_path(self) -> &'static str {
+        match self {
+            Self::Rust => "Cargo.lock",
+            Self::Node => "package-lock.json",
+        }
+    }
+
     /// All recognized ecosystems, in detection priority order.
     pub const ALL: &[Self] = &[Self::Rust, Self::Node];
 }
@@ -142,6 +150,12 @@ mod tests {
     fn changelog_tool_display() {
         assert_eq!(ChangelogTool::GitCliff.to_string(), "git-cliff");
         assert_eq!(ChangelogTool::Cog.to_string(), "cog");
+    }
+
+    #[test]
+    fn lockfile_paths() {
+        assert_eq!(Ecosystem::Rust.lockfile_path(), "Cargo.lock");
+        assert_eq!(Ecosystem::Node.lockfile_path(), "package-lock.json");
     }
 
     #[test]
