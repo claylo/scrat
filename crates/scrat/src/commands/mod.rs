@@ -6,6 +6,8 @@ pub mod doctor;
 
 pub mod info;
 
+pub mod notes;
+
 pub mod preflight;
 
 pub mod ship;

@@ -103,6 +103,9 @@ pub enum Commands {
     /// Determine next version and update project files
     Bump(commands::bump::BumpArgs),
 
+    /// Render release notes (preview without shipping)
+    Notes(commands::notes::NotesArgs),
+
     /// Run the full release workflow
     Ship(commands::ship::ShipArgs),
 }

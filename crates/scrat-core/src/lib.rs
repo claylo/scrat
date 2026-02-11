@@ -13,6 +13,7 @@
 //! - [`error`] - Error types and result aliases
 //! - [`git`] - Git operations for release workflows
 //! - [`hooks`] - Hook executor for shell commands at phase boundaries
+//! - [`notes`] - Release notes rendering via git-cliff context injection
 //! - [`pipeline`] - Pipeline context accumulator for structured release data
 //! - [`preflight`] - Release readiness checks
 //! - [`ship`] - Ship orchestrator (full release workflow)
@@ -48,6 +49,8 @@ pub mod error;
 pub mod git;
 
 pub mod hooks;
+
+pub mod notes;
 
 pub mod pipeline;
 

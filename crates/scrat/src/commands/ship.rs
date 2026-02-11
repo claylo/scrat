@@ -41,6 +41,10 @@ pub struct ShipArgs {
     #[arg(long)]
     pub no_stats: bool,
 
+    /// Skip release notes rendering (uses GitHub auto-generated notes)
+    #[arg(long)]
+    pub no_notes: bool,
+
     /// Skip running tests
     #[arg(long)]
     pub skip_tests: bool,
@@ -78,6 +82,7 @@ pub fn cmd_ship(
         no_release: args.no_release,
         no_deps: args.no_deps,
         no_stats: args.no_stats,
+        no_notes: args.no_notes,
         dry_run: args.dry_run,
         skip_tests: args.skip_tests,
     };
