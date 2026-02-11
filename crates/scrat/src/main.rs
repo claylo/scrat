@@ -73,6 +73,7 @@ fn main() -> anyhow::Result<()> {
             commands::preflight::cmd_preflight(args, cli.json, &config, &cwd)
         }
         Commands::Bump(args) => commands::bump::cmd_bump(args, cli.json, &config, &cwd),
+        Commands::Notes(args) => commands::notes::cmd_notes(args, cli.json, &config, &cwd),
         Commands::Ship(args) => commands::ship::cmd_ship(args, cli.json, &config, &cwd),
     };
     if let Err(ref err) = result {

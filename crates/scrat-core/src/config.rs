@@ -118,6 +118,11 @@ pub struct ReleaseConfig {
     /// Hook commands produce these files; scrat attaches them.
     /// Paths are relative to the project root.
     pub assets: Option<Vec<String>>,
+    /// Path to a custom git-cliff template for release notes.
+    ///
+    /// If unset, uses the built-in template. The template is rendered by
+    /// git-cliff (Tera syntax) with scrat's extra data injected into context.
+    pub notes_template: Option<String>,
 }
 
 /// Hook commands to run at each phase of the release workflow.
@@ -747,6 +752,34 @@ assets = ["release-card.png", "checksums.txt"]
                 "release-card.png".to_string(),
                 "checksums.txt".to_string()
             ])
+        );
+    }
+
+    #[test]
+    fn test_release_notes_template_config() {
+        let tmp = TempDir::new().unwrap();
+        let config_path = tmp.path().join("config.toml");
+        fs::write(
+            &config_path,
+            r#"
+[release]
+changelog_tool = "git-cliff"
+notes_template = "templates/my-notes.tera"
+"#,
+        )
+        .unwrap();
+
+        let config_path = Utf8PathBuf::try_from(config_path).unwrap();
+        let config = ConfigLoader::new()
+            .with_user_config(false)
+            .with_file(&config_path)
+            .load()
+            .unwrap();
+
+        let release = config.release.unwrap();
+        assert_eq!(
+            release.notes_template.as_deref(),
+            Some("templates/my-notes.tera")
         );
     }
 

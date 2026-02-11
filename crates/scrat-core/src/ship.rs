@@ -20,7 +20,7 @@ use camino::Utf8Path;
 use semver::Version;
 use serde::Serialize;
 use thiserror::Error;
-use tracing::{debug, info, instrument};
+use tracing::{debug, info, instrument, warn};
 
 use crate::bump::{self, InteractiveBump, ReadyBump};
 use crate::config::Config;
@@ -28,6 +28,7 @@ use crate::deps;
 use crate::ecosystem::ProjectDetection;
 use crate::git;
 use crate::hooks::{self, HookContext};
+use crate::notes;
 use crate::pipeline::{PipelineContext, PipelineContextInit};
 use crate::preflight;
 use crate::stats;
@@ -93,6 +94,8 @@ pub struct ShipOptions {
     pub no_deps: bool,
     /// Skip release statistics collection.
     pub no_stats: bool,
+    /// Skip release notes rendering (falls back to --generate-notes).
+    pub no_notes: bool,
     /// Preview what would happen without making changes.
     pub dry_run: bool,
     /// Skip running tests.
@@ -602,14 +605,62 @@ impl ReadyShip {
             &mut ctx,
         )?;
 
+        // Render release notes (before creating the release)
+        let notes_file = if !self.options.no_release && !self.options.no_notes && !is_dry {
+            let github_release = self
+                .config
+                .release
+                .as_ref()
+                .and_then(|r| r.github_release)
+                .unwrap_or(true);
+            if github_release {
+                let custom_template = self
+                    .config
+                    .release
+                    .as_ref()
+                    .and_then(|r| r.notes_template.as_deref());
+                match notes::render_notes(project_root, &ctx, custom_template) {
+                    Ok(rendered) => {
+                        debug!(len = rendered.len(), "release notes rendered");
+                        ctx.release_notes = Some(rendered.clone());
+                        // Write to temp file for --notes-file
+                        match write_notes_tempfile(&rendered) {
+                            Ok(f) => Some(f),
+                            Err(e) => {
+                                warn!(
+                                    "failed to write notes temp file: {e}, falling back to --generate-notes"
+                                );
+                                None
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        warn!(
+                            "release notes rendering failed: {e}, falling back to --generate-notes"
+                        );
+                        None
+                    }
+                }
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+
         on_event(ShipEvent::PhaseStarted(ShipPhase::Release));
         let release_outcome = if self.options.no_release {
             PhaseOutcome::Skipped {
                 reason: "--no-release flag".into(),
             }
         } else if is_dry {
+            let notes_msg = if self.options.no_notes {
+                " (--generate-notes)"
+            } else {
+                " (with rendered notes)"
+            };
             PhaseOutcome::Success {
-                message: format!("Would create GitHub release for {tag}"),
+                message: format!("Would create GitHub release for {tag}{notes_msg}"),
             }
         } else {
             let github_release = self
@@ -625,7 +676,8 @@ impl ReadyShip {
                     .as_ref()
                     .and_then(|r| r.assets.as_deref())
                     .unwrap_or(&[]);
-                let release_result = run_release_phase(project_root, &tag, assets)?;
+                let notes_path = notes_file.as_ref().map(|f| f.path());
+                let release_result = run_release_phase(project_root, &tag, assets, notes_path)?;
                 ctx.record_release(release_result.url.clone());
                 let msg = release_result.url.as_ref().map_or_else(
                     || format!("Created GitHub release {tag}"),
@@ -874,18 +926,33 @@ struct ReleasePhaseResult {
     url: Option<String>,
 }
 
+/// Write rendered notes to a temporary file that lives until the `NamedTempFile` is dropped.
+fn write_notes_tempfile(notes: &str) -> Result<tempfile::NamedTempFile, std::io::Error> {
+    use std::io::Write;
+    let mut f = tempfile::NamedTempFile::new()?;
+    f.write_all(notes.as_bytes())?;
+    f.flush()?;
+    Ok(f)
+}
+
 /// Create a GitHub release using `gh release create`.
+///
+/// When `notes_file` is `Some`, uses `--notes-file` with the rendered release
+/// notes. Otherwise falls back to `--generate-notes` (GitHub's auto-generated).
 fn run_release_phase(
     project_root: &Utf8Path,
     tag: &str,
     assets: &[String],
+    notes_file: Option<&std::path::Path>,
 ) -> ShipResult<ReleasePhaseResult> {
-    let mut args = vec![
-        "release".to_string(),
-        "create".to_string(),
-        tag.to_string(),
-        "--generate-notes".to_string(),
-    ];
+    let mut args = vec!["release".to_string(), "create".to_string(), tag.to_string()];
+
+    if let Some(path) = notes_file {
+        args.push("--notes-file".to_string());
+        args.push(path.to_string_lossy().to_string());
+    } else {
+        args.push("--generate-notes".to_string());
+    }
 
     // Attach assets if configured
     for asset in assets {
@@ -1007,6 +1074,7 @@ mod tests {
         assert!(!opts.no_release);
         assert!(!opts.no_deps);
         assert!(!opts.no_stats);
+        assert!(!opts.no_notes);
         assert!(!opts.skip_tests);
         assert!(!opts.no_changelog);
         assert!(opts.explicit_version.is_none());

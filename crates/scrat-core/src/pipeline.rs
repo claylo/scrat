@@ -79,6 +79,11 @@ pub struct PipelineContext {
     /// Asset paths attached to the release.
     pub assets: Vec<String>,
 
+    // ── Release notes ──
+    /// Rendered release notes markdown (available to post_release hooks).
+    #[serde(default)]
+    pub release_notes: Option<String>,
+
     // ── Extensible ──
     /// Arbitrary metadata for hooks and templates.
     pub metadata: HashMap<String, serde_json::Value>,
@@ -180,6 +185,7 @@ impl PipelineContext {
             commit_hash: None,
             release_url: None,
             assets: Vec::new(),
+            release_notes: None,
             metadata: HashMap::new(),
             dry_run: init.dry_run,
         }
@@ -304,6 +310,7 @@ mod tests {
         assert!(ctx.commit_hash.is_none());
         assert!(ctx.release_url.is_none());
         assert!(ctx.assets.is_empty());
+        assert!(ctx.release_notes.is_none());
         assert!(ctx.metadata.is_empty());
     }
 
@@ -367,6 +374,7 @@ mod tests {
         let mut ctx = PipelineContext::new(test_init());
         ctx.record_bump(true, vec!["Cargo.toml".into()]);
         ctx.record_git(Some("abc1234".into()), Some("main".into()));
+        ctx.release_notes = Some("## Release 1.2.3\nSome notes".into());
         ctx.metadata
             .insert("custom_key".into(), serde_json::json!("custom_value"));
 
@@ -384,6 +392,10 @@ mod tests {
         assert!(back.changelog_updated);
         assert_eq!(back.modified_files, vec!["Cargo.toml"]);
         assert_eq!(back.commit_hash.as_deref(), Some("abc1234"));
+        assert_eq!(
+            back.release_notes.as_deref(),
+            Some("## Release 1.2.3\nSome notes")
+        );
         assert_eq!(
             back.metadata.get("custom_key").and_then(|v| v.as_str()),
             Some("custom_value")

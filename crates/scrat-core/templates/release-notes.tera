@@ -1,0 +1,106 @@
+{# scrat release-notes template — rendered by git-cliff via --from-context / --body #}
+{# Context: git-cliff's native release object + extra.stats, extra.deps, extra.metadata #}
+{% if version -%}
+## {{ version }}
+{%- else -%}
+## Unreleased
+{%- endif %} — {{ timestamp | date(format="%Y-%m-%d") }}
+{% if previous and previous.version %}
+[Compare](../compare/{{ previous.version }}...{{ version }})
+{% endif %}
+{# ── Breaking changes ── #}
+{% set breaking_commits = commits | filter(attribute="breaking", value=true) -%}
+{% if breaking_commits | length > 0 %}
+> [!WARNING]
+> **Breaking changes in this release**
+{% for commit in breaking_commits %}
+> - {{ commit.message }}{% if commit.breaking_description %} — {{ commit.breaking_description }}{% endif %}
+{%- endfor %}
+
+{% endif -%}
+
+{# ── Grouped changes ── #}
+{% for group, commits in commits | group_by(attribute="group") -%}
+{% if group == "feat" or group == "Features" -%}
+### ✨ Added
+{% elif group == "fix" or group == "Bug Fixes" -%}
+### 🩹 Fixed
+{% elif group == "perf" or group == "Performance" -%}
+### ⚡ Performance
+{% elif group == "refactor" or group == "Refactor" -%}
+### 🧰 Refactor
+{% elif group == "docs" or group == "Documentation" -%}
+### 📚 Docs
+{% elif group == "test" or group == "Testing" -%}
+### 🧪 Tests
+{% elif group == "style" or group == "Styling" -%}
+### 🎨 Style
+{% elif group == "chore" or group == "Miscellaneous Tasks" -%}
+### 🧹 Chores
+{% else -%}
+### {{ group }}
+{% endif -%}
+{% for commit in commits -%}
+- {% if commit.scope %}*({{ commit.scope }})* {% endif %}{{ commit.message }} ([{{ commit.id | truncate(length=7, end="") }}](../commit/{{ commit.id }}))
+{% endfor %}
+{% endfor -%}
+
+{# ── Dependencies ── #}
+{% if extra and extra.deps and extra.deps | length > 0 -%}
+### 📦 Dependencies
+{% set updated = extra.deps | filter(attribute="from") | filter(attribute="to") -%}
+{% set added = extra.deps | filter(attribute="from", value=false) -%}
+{% set removed = extra.deps | filter(attribute="to", value=false) -%}
+{% if updated | length > 0 -%}
+{% for d in updated -%}
+- **{{ d.name }}**: `{{ d.from }}` → `{{ d.to }}`
+{% endfor -%}
+{% endif -%}
+{% if added | length > 0 -%}
+
+**Added:**
+{% for d in added -%}
+- **{{ d.name }}** `{{ d.to }}`
+{% endfor -%}
+{% endif -%}
+{% if removed | length > 0 -%}
+
+**Removed:**
+{% for d in removed -%}
+- **{{ d.name }}** `{{ d.from }}`
+{% endfor -%}
+{% endif -%}
+
+{% endif -%}
+
+{# ── Stats table ── #}
+{% set s = extra.stats | default(value=false) -%}
+{% if s -%}
+### 📊 Stats
+
+| Metric | Value |
+|---|---:|
+| Commits | {{ statistics.commit_count | default(value="—") }} |
+{% if s.files_changed is defined -%}
+| Files changed | {{ s.files_changed }} |
+{% endif -%}
+{% if s.insertions is defined -%}
+| Insertions | +{{ s.insertions }} |
+{% endif -%}
+{% if s.deletions is defined -%}
+| Deletions | -{{ s.deletions }} |
+{% endif -%}
+
+{% endif -%}
+
+{# ── Nerd drawer ── #}
+<details>
+<summary>Full commit list</summary>
+
+{% for commit in commits -%}
+- [`{{ commit.id | truncate(length=7, end="") }}`](../commit/{{ commit.id }}) {{ commit.message }}{% if commit.author and commit.author.name %} — *{{ commit.author.name }}*{% endif %}
+{% endfor -%}
+{% if s and s.contributors and s.contributors | length > 0 %}
+**Contributors:** {% for c in s.contributors %}{{ c.name }} ({{ c.count }}){% if not loop.last %}, {% endif %}{% endfor %}
+{% endif %}
+</details>
