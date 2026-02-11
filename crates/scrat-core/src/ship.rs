@@ -401,6 +401,7 @@ impl ReadyShip {
             ShipPhase::Preflight,
             is_dry,
             &mut on_event,
+            &mut ctx,
         )?;
 
         // ── Test Phase ──
@@ -411,6 +412,7 @@ impl ReadyShip {
             ShipPhase::Test,
             is_dry,
             &mut on_event,
+            &mut ctx,
         )?;
 
         on_event(ShipEvent::PhaseStarted(ShipPhase::Test));
@@ -444,6 +446,7 @@ impl ReadyShip {
             ShipPhase::Test,
             is_dry,
             &mut on_event,
+            &mut ctx,
         )?;
 
         // ── Bump Phase ──
@@ -454,6 +457,7 @@ impl ReadyShip {
             ShipPhase::Bump,
             is_dry,
             &mut on_event,
+            &mut ctx,
         )?;
 
         on_event(ShipEvent::PhaseStarted(ShipPhase::Bump));
@@ -491,6 +495,7 @@ impl ReadyShip {
             ShipPhase::Bump,
             is_dry,
             &mut on_event,
+            &mut ctx,
         )?;
 
         // ── Publish Phase ──
@@ -501,6 +506,7 @@ impl ReadyShip {
             ShipPhase::Publish,
             is_dry,
             &mut on_event,
+            &mut ctx,
         )?;
 
         on_event(ShipEvent::PhaseStarted(ShipPhase::Publish));
@@ -535,6 +541,7 @@ impl ReadyShip {
             ShipPhase::Publish,
             is_dry,
             &mut on_event,
+            &mut ctx,
         )?;
 
         // ── Git Phase (commit + tag + push) ──
@@ -545,6 +552,7 @@ impl ReadyShip {
             ShipPhase::Git,
             is_dry,
             &mut on_event,
+            &mut ctx,
         )?;
 
         on_event(ShipEvent::PhaseStarted(ShipPhase::Git));
@@ -580,6 +588,7 @@ impl ReadyShip {
             ShipPhase::Git,
             is_dry,
             &mut on_event,
+            &mut ctx,
         )?;
 
         // ── Release Phase (GitHub release) ──
@@ -590,6 +599,7 @@ impl ReadyShip {
             ShipPhase::Release,
             is_dry,
             &mut on_event,
+            &mut ctx,
         )?;
 
         on_event(ShipEvent::PhaseStarted(ShipPhase::Release));
@@ -641,6 +651,7 @@ impl ReadyShip {
             ShipPhase::Release,
             is_dry,
             &mut on_event,
+            &mut ctx,
         )?;
 
         // ── post_ship hooks ──
@@ -651,6 +662,7 @@ impl ReadyShip {
             ShipPhase::Release,
             is_dry,
             &mut on_event,
+            &mut ctx,
         )?;
 
         let outcome = ShipOutcome {
@@ -681,6 +693,8 @@ impl ReadyShip {
 /// Run hooks for a phase, returning the number of hooks reported.
 ///
 /// In dry-run mode, hooks are reported (via events) but not executed.
+/// If any `filter:` hooks are present and produce output, the pipeline
+/// context is updated in place with the deserialized result.
 fn run_phase_hooks(
     commands: Option<&[String]>,
     context: &HookContext,
@@ -688,6 +702,7 @@ fn run_phase_hooks(
     phase: ShipPhase,
     dry_run: bool,
     on_event: &mut impl FnMut(ShipEvent),
+    pipeline_ctx: &mut PipelineContext,
 ) -> ShipResult<usize> {
     let Some(cmds) = commands else {
         return Ok(0);
@@ -710,7 +725,22 @@ fn run_phase_hooks(
     });
 
     if !dry_run {
-        hooks::run_hooks(cmds, context, project_root)?;
+        let pipeline_json =
+            serde_json::to_string(pipeline_ctx).map_err(|e| ShipError::PhaseFailed {
+                phase,
+                message: format!("failed to serialize pipeline context: {e}"),
+            })?;
+        let output = hooks::run_hooks(cmds, context, project_root, Some(&pipeline_json))?;
+
+        if let Some(filter_json) = output.filter_output {
+            *pipeline_ctx =
+                serde_json::from_str(&filter_json).map_err(|e| ShipError::PhaseFailed {
+                    phase,
+                    message: format!(
+                        "filter output could not be deserialized into pipeline context: {e}"
+                    ),
+                })?;
+        }
     }
 
     on_event(ShipEvent::HooksCompleted { phase, count });
