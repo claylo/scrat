@@ -14,7 +14,7 @@
 //! If the plan returns [`ShipPlan::NeedsInteraction`], the CLI prompts
 //! the user and calls [`resolve_ship_interaction`] to get a [`ReadyShip`].
 
-use std::process::Command;
+use std::process::{Command, Stdio};
 
 use camino::Utf8Path;
 use semver::Version;
@@ -680,47 +680,82 @@ impl ReadyShip {
             None
         };
 
+        // Resolve release config for both dry-run and real execution
+        let release_cfg = self.config.release.as_ref();
+        let github_release = release_cfg
+            .and_then(|r| r.github_release)
+            .unwrap_or(true);
+        let draft = self
+            .options
+            .draft_override
+            .or_else(|| release_cfg.and_then(|r| r.draft))
+            .unwrap_or(true);
+        let title = release_cfg
+            .and_then(|r| r.title.as_deref())
+            .map(|t| hooks::interpolate_command(t, &hook_ctx));
+        let discussion_category = release_cfg.and_then(|r| r.discussion_category.as_deref());
+        let assets = release_cfg
+            .and_then(|r| r.assets.as_deref())
+            .unwrap_or(&[]);
+
         on_event(ShipEvent::PhaseStarted(ShipPhase::Release));
         let release_outcome = if self.options.no_release {
             PhaseOutcome::Skipped {
                 reason: "--no-release flag".into(),
             }
+        } else if !github_release {
+            PhaseOutcome::Skipped {
+                reason: "github_release = false in config".into(),
+            }
         } else if is_dry {
+            let draft_label = if draft { " as draft" } else { "" };
+            let title_label = title
+                .as_ref()
+                .map_or(String::new(), |t| format!(" titled \"{t}\""));
             let notes_msg = if self.options.no_notes {
                 " (--generate-notes)"
             } else {
                 " (with rendered notes)"
             };
+            let asset_count = assets.len();
+            let asset_msg = if asset_count > 0 {
+                format!(
+                    ", {} asset{}",
+                    asset_count,
+                    if asset_count == 1 { "" } else { "s" }
+                )
+            } else {
+                String::new()
+            };
             PhaseOutcome::Success {
-                message: format!("Would create GitHub release for {tag}{notes_msg}"),
+                message: format!(
+                    "Would create GitHub release for {tag}{draft_label}{title_label}{notes_msg}{asset_msg}"
+                ),
             }
         } else {
-            let github_release = self
-                .config
-                .release
-                .as_ref()
-                .and_then(|r| r.github_release)
-                .unwrap_or(true);
-            if github_release {
-                let assets = self
-                    .config
-                    .release
-                    .as_ref()
-                    .and_then(|r| r.assets.as_deref())
-                    .unwrap_or(&[]);
-                let notes_path = notes_file.as_ref().map(|f| f.path());
-                let release_result = run_release_phase(project_root, &tag, assets, notes_path)?;
-                ctx.record_release(release_result.url.clone());
-                let msg = release_result.url.as_ref().map_or_else(
-                    || format!("Created GitHub release {tag}"),
-                    |url| format!("Created GitHub release: {url}"),
-                );
-                PhaseOutcome::Success { message: msg }
+            let notes_path = notes_file.as_ref().map(|f| f.path());
+            let release_opts = ReleaseOptions {
+                tag: &tag,
+                title,
+                draft,
+                notes_file: notes_path,
+                assets,
+                discussion_category,
+                project_root,
+            };
+            let release_result = run_release_phase(&release_opts)?;
+            ctx.record_release(release_result.url.clone());
+            let action = if release_result.edited {
+                "Updated"
             } else {
-                PhaseOutcome::Skipped {
-                    reason: "github_release = false in config".into(),
-                }
-            }
+                "Created"
+            };
+            let draft_label = if draft { " (draft)" } else { "" };
+            let msg = release_result.url.as_ref().map_or_else(
+                || format!("{action} GitHub release {tag}{draft_label}"),
+                |url| format!("{action} GitHub release{draft_label}: {url}"),
+            );
+            PhaseOutcome::Success { message: msg }
         };
         on_event(ShipEvent::PhaseCompleted(
             ShipPhase::Release,
@@ -959,6 +994,8 @@ fn run_git_phase(
 struct ReleasePhaseResult {
     /// The URL of the created release (None if `gh` didn't output one).
     url: Option<String>,
+    /// Whether an existing release was edited (vs newly created).
+    edited: bool,
 }
 
 /// Write rendered notes to a temporary file that lives until the `NamedTempFile` is dropped.
@@ -970,56 +1007,190 @@ fn write_notes_tempfile(notes: &str) -> Result<tempfile::NamedTempFile, std::io:
     Ok(f)
 }
 
-/// Create a GitHub release using `gh release create`.
-///
-/// When `notes_file` is `Some`, uses `--notes-file` with the rendered release
-/// notes. Otherwise falls back to `--generate-notes` (GitHub's auto-generated).
-fn run_release_phase(
-    project_root: &Utf8Path,
-    tag: &str,
-    assets: &[String],
-    notes_file: Option<&std::path::Path>,
-) -> ShipResult<ReleasePhaseResult> {
-    let mut args = vec!["release".to_string(), "create".to_string(), tag.to_string()];
+// ──────────────────────────────────────────────
+// Release phase: edit-vs-create with configurable options
+// ──────────────────────────────────────────────
 
-    if let Some(path) = notes_file {
-        args.push("--notes-file".to_string());
-        args.push(path.to_string_lossy().to_string());
-    } else {
-        args.push("--generate-notes".to_string());
+/// Options for the GitHub release phase.
+struct ReleaseOptions<'a> {
+    tag: &'a str,
+    title: Option<String>,
+    draft: bool,
+    notes_file: Option<&'a std::path::Path>,
+    assets: &'a [String],
+    discussion_category: Option<&'a str>,
+    project_root: &'a Utf8Path,
+}
+
+/// Build args for `gh release create`.
+fn build_create_args(opts: &ReleaseOptions<'_>) -> Vec<String> {
+    let mut args = vec!["release".into(), "create".into(), opts.tag.into()];
+
+    if let Some(ref title) = opts.title {
+        args.push("--title".into());
+        args.push(title.clone());
     }
 
-    // Attach assets if configured
-    for asset in assets {
+    if opts.draft {
+        args.push("--draft".into());
+    }
+
+    if let Some(path) = opts.notes_file {
+        args.push("--notes-file".into());
+        args.push(path.to_string_lossy().to_string());
+    } else {
+        args.push("--generate-notes".into());
+    }
+
+    if let Some(cat) = opts.discussion_category {
+        args.push("--discussion-category".into());
+        args.push(cat.into());
+    }
+
+    for asset in opts.assets {
         args.push(asset.clone());
     }
 
-    debug!(?args, "creating GitHub release");
+    args
+}
 
-    let output = Command::new("gh")
-        .args(&args)
-        .current_dir(project_root.as_std_path())
-        .output()
-        .map_err(|e| ShipError::PhaseFailed {
-            phase: ShipPhase::Release,
-            message: format!("failed to execute gh: {e}"),
-        })?;
+/// Build args for `gh release edit`.
+fn build_edit_args(opts: &ReleaseOptions<'_>) -> Vec<String> {
+    let mut args = vec!["release".into(), "edit".into(), opts.tag.into()];
 
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
-        return Err(ShipError::PhaseFailed {
-            phase: ShipPhase::Release,
-            message: format!("gh release create failed: {stderr}"),
-        });
+    if let Some(ref title) = opts.title {
+        args.push("--title".into());
+        args.push(title.clone());
     }
 
-    let raw_url = String::from_utf8_lossy(&output.stdout).trim().to_string();
-    let url = if raw_url.is_empty() {
-        None
+    if opts.draft {
+        args.push("--draft".into());
     } else {
-        Some(raw_url)
-    };
-    Ok(ReleasePhaseResult { url })
+        args.push("--draft=false".into());
+    }
+
+    if let Some(path) = opts.notes_file {
+        args.push("--notes-file".into());
+        args.push(path.to_string_lossy().to_string());
+    }
+
+    args
+}
+
+/// Check if a GitHub release already exists for the given tag.
+fn release_exists(tag: &str, project_root: &Utf8Path) -> bool {
+    Command::new("gh")
+        .args(["release", "view", tag])
+        .current_dir(project_root.as_std_path())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status()
+        .is_ok_and(|s| s.success())
+}
+
+/// Upload assets to an existing release, replacing any with the same name.
+fn upload_release_assets(
+    tag: &str,
+    assets: &[String],
+    project_root: &Utf8Path,
+) -> ShipResult<()> {
+    for asset in assets {
+        // Try to delete existing asset (ignore failure — may not exist)
+        let basename = std::path::Path::new(asset)
+            .file_name()
+            .map(|n| n.to_string_lossy().to_string())
+            .unwrap_or_else(|| asset.clone());
+
+        let _ = Command::new("gh")
+            .args(["release", "delete-asset", tag, &basename, "--yes"])
+            .current_dir(project_root.as_std_path())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status();
+
+        // Upload
+        let output = Command::new("gh")
+            .args(["release", "upload", tag, asset])
+            .current_dir(project_root.as_std_path())
+            .output()
+            .map_err(|e| ShipError::PhaseFailed {
+                phase: ShipPhase::Release,
+                message: format!("failed to upload asset {asset}: {e}"),
+            })?;
+
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+            return Err(ShipError::PhaseFailed {
+                phase: ShipPhase::Release,
+                message: format!("failed to upload asset {asset}: {stderr}"),
+            });
+        }
+    }
+    Ok(())
+}
+
+/// Create or update a GitHub release using `gh`.
+///
+/// Auto-detects whether a release already exists for the tag:
+/// - **Exists:** edits the release, then re-uploads any assets
+/// - **New:** creates the release with all options
+fn run_release_phase(opts: &ReleaseOptions<'_>) -> ShipResult<ReleasePhaseResult> {
+    let exists = release_exists(opts.tag, opts.project_root);
+
+    if exists {
+        debug!(tag = opts.tag, "release exists, editing");
+        let args = build_edit_args(opts);
+
+        let output = Command::new("gh")
+            .args(&args)
+            .current_dir(opts.project_root.as_std_path())
+            .output()
+            .map_err(|e| ShipError::PhaseFailed {
+                phase: ShipPhase::Release,
+                message: format!("failed to execute gh release edit: {e}"),
+            })?;
+
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+            return Err(ShipError::PhaseFailed {
+                phase: ShipPhase::Release,
+                message: format!("gh release edit failed: {stderr}"),
+            });
+        }
+
+        // Upload assets separately for edits
+        if !opts.assets.is_empty() {
+            upload_release_assets(opts.tag, opts.assets, opts.project_root)?;
+        }
+
+        let raw_url = String::from_utf8_lossy(&output.stdout).trim().to_string();
+        let url = if raw_url.is_empty() { None } else { Some(raw_url) };
+        Ok(ReleasePhaseResult { url, edited: true })
+    } else {
+        debug!(tag = opts.tag, "creating new release");
+        let args = build_create_args(opts);
+
+        let output = Command::new("gh")
+            .args(&args)
+            .current_dir(opts.project_root.as_std_path())
+            .output()
+            .map_err(|e| ShipError::PhaseFailed {
+                phase: ShipPhase::Release,
+                message: format!("failed to execute gh release create: {e}"),
+            })?;
+
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+            return Err(ShipError::PhaseFailed {
+                phase: ShipPhase::Release,
+                message: format!("gh release create failed: {stderr}"),
+            });
+        }
+
+        let raw_url = String::from_utf8_lossy(&output.stdout).trim().to_string();
+        let url = if raw_url.is_empty() { None } else { Some(raw_url) };
+        Ok(ReleasePhaseResult { url, edited: false })
+    }
 }
 
 #[cfg(test)]
@@ -1140,5 +1311,103 @@ mod tests {
         assert_eq!(hc.changelog_path, "/tmp/project/CHANGELOG.md");
         assert_eq!(hc.owner, "claylo");
         assert_eq!(hc.repo, "scrat");
+    }
+
+    #[test]
+    fn build_create_args_with_all_options() {
+        let notes = tempfile::NamedTempFile::new().unwrap();
+        let opts = ReleaseOptions {
+            tag: "v1.2.3",
+            title: Some("myrepo v1.2.3".into()),
+            draft: true,
+            notes_file: Some(notes.path()),
+            assets: &["dist/app.tar.gz".into(), "dist/checksums.txt".into()],
+            discussion_category: Some("releases"),
+            project_root: Utf8Path::new("/tmp"),
+        };
+        let args = build_create_args(&opts);
+        assert_eq!(args[0], "release");
+        assert_eq!(args[1], "create");
+        assert_eq!(args[2], "v1.2.3");
+        assert!(args.contains(&"--title".into()));
+        assert!(args.contains(&"myrepo v1.2.3".into()));
+        assert!(args.contains(&"--draft".into()));
+        assert!(args.contains(&"--notes-file".into()));
+        assert!(args.contains(&"--discussion-category".into()));
+        assert!(args.contains(&"releases".into()));
+        assert!(args.contains(&"dist/app.tar.gz".into()));
+        assert!(args.contains(&"dist/checksums.txt".into()));
+    }
+
+    #[test]
+    fn build_create_args_minimal() {
+        let opts = ReleaseOptions {
+            tag: "v0.1.0",
+            title: None,
+            draft: false,
+            notes_file: None,
+            assets: &[],
+            discussion_category: None,
+            project_root: Utf8Path::new("/tmp"),
+        };
+        let args = build_create_args(&opts);
+        assert_eq!(
+            args,
+            vec!["release", "create", "v0.1.0", "--generate-notes"]
+        );
+    }
+
+    #[test]
+    fn build_edit_args_draft() {
+        let opts = ReleaseOptions {
+            tag: "v1.0.0",
+            title: Some("Release v1.0.0".into()),
+            draft: true,
+            notes_file: None,
+            assets: &[],
+            discussion_category: None,
+            project_root: Utf8Path::new("/tmp"),
+        };
+        let args = build_edit_args(&opts);
+        assert_eq!(args[0], "release");
+        assert_eq!(args[1], "edit");
+        assert_eq!(args[2], "v1.0.0");
+        assert!(args.contains(&"--draft".into()));
+        assert!(args.contains(&"--title".into()));
+        assert!(args.contains(&"Release v1.0.0".into()));
+    }
+
+    #[test]
+    fn build_edit_args_publish() {
+        let opts = ReleaseOptions {
+            tag: "v1.0.0",
+            title: None,
+            draft: false,
+            notes_file: None,
+            assets: &[],
+            discussion_category: None,
+            project_root: Utf8Path::new("/tmp"),
+        };
+        let args = build_edit_args(&opts);
+        assert!(args.contains(&"--draft=false".into()));
+        assert!(!args.contains(&"--title".into()));
+    }
+
+    #[test]
+    fn build_edit_args_with_notes_file() {
+        let notes = tempfile::NamedTempFile::new().unwrap();
+        let opts = ReleaseOptions {
+            tag: "v2.0.0",
+            title: None,
+            draft: true,
+            notes_file: Some(notes.path()),
+            assets: &[],
+            discussion_category: None,
+            project_root: Utf8Path::new("/tmp"),
+        };
+        let args = build_edit_args(&opts);
+        assert!(args.contains(&"--notes-file".into()));
+        // edit should NOT have --generate-notes
+        assert!(!args.contains(&"--generate-notes".into()));
     }
 }
