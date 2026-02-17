@@ -4,8 +4,8 @@
 ## {{ version }}
 {%- else -%}
 ## Unreleased
-{%- endif %} — {{ timestamp | date(format="%Y-%m-%d") }}
-{% if previous and previous.version %}
+{%- endif %}{% if timestamp %} — {{ timestamp | date(format="%Y-%m-%d") }}{% endif %}
+{% if previous and previous.version and version %}
 [Compare](../compare/{{ previous.version }}...{{ version }})
 {% endif %}
 {# ── Breaking changes ── #}
@@ -20,22 +20,23 @@
 {% endif -%}
 
 {# ── Grouped changes ── #}
+{# Group names may include sort-priority HTML comments (e.g., "<!-- 0 -->Features") #}
 {% for group, commits in commits | group_by(attribute="group") -%}
-{% if group == "feat" or group == "Features" -%}
+{% if "feat" in group or "Features" in group or "Added" in group -%}
 ### ✨ Added
-{% elif group == "fix" or group == "Bug Fixes" -%}
+{% elif "fix" in group or "Bug Fixes" in group -%}
 ### 🩹 Fixed
-{% elif group == "perf" or group == "Performance" -%}
+{% elif "perf" in group or "Performance" in group -%}
 ### ⚡ Performance
-{% elif group == "refactor" or group == "Refactor" -%}
+{% elif "refactor" in group or "Refactor" in group -%}
 ### 🧰 Refactor
-{% elif group == "docs" or group == "Documentation" -%}
+{% elif "docs" in group or "Documentation" in group -%}
 ### 📚 Docs
-{% elif group == "test" or group == "Testing" -%}
+{% elif "test" in group or "Testing" in group -%}
 ### 🧪 Tests
-{% elif group == "style" or group == "Styling" -%}
+{% elif "style" in group or "Styling" in group -%}
 ### 🎨 Style
-{% elif group == "chore" or group == "Miscellaneous Tasks" -%}
+{% elif "chore" in group or "Miscellaneous" in group -%}
 ### 🧹 Chores
 {% else -%}
 ### {{ group }}
@@ -48,29 +49,16 @@
 {# ── Dependencies ── #}
 {% if extra and extra.deps and extra.deps | length > 0 -%}
 ### 📦 Dependencies
-{% set updated = extra.deps | filter(attribute="from") | filter(attribute="to") -%}
-{% set added = extra.deps | filter(attribute="from", value=false) -%}
-{% set removed = extra.deps | filter(attribute="to", value=false) -%}
-{% if updated | length > 0 -%}
-{% for d in updated -%}
+
+{% for d in extra.deps -%}
+{% if d.from and d.to -%}
 - **{{ d.name }}**: `{{ d.from }}` → `{{ d.to }}`
-{% endfor -%}
+{% elif d.to -%}
+- **{{ d.name }}** `{{ d.to }}` *(added)*
+{% elif d.from -%}
+- ~~{{ d.name }}~~ `{{ d.from }}` *(removed)*
 {% endif -%}
-{% if added | length > 0 -%}
-
-**Added:**
-{% for d in added -%}
-- **{{ d.name }}** `{{ d.to }}`
-{% endfor -%}
-{% endif -%}
-{% if removed | length > 0 -%}
-
-**Removed:**
-{% for d in removed -%}
-- **{{ d.name }}** `{{ d.from }}`
-{% endfor -%}
-{% endif -%}
-
+{% endfor %}
 {% endif -%}
 
 {# ── Stats table ── #}
