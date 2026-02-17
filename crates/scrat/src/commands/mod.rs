@@ -4,6 +4,8 @@ pub mod bump;
 
 pub mod doctor;
 
+pub mod init;
+
 pub mod info;
 
 pub mod notes;

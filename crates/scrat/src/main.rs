@@ -68,6 +68,7 @@ fn main() -> anyhow::Result<()> {
     // Execute command
     let result = match cli.command {
         Commands::Doctor(args) => commands::doctor::cmd_doctor(args, cli.json, &cwd),
+        Commands::Init(args) => commands::init::cmd_init(args, cli.json, &cwd),
         Commands::Info(args) => commands::info::cmd_info(args, cli.json, &config, &cwd),
         Commands::Preflight(args) => {
             commands::preflight::cmd_preflight(args, cli.json, &config, &cwd)

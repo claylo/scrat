@@ -94,6 +94,9 @@ pub enum Commands {
     /// Diagnose configuration and environment
     Doctor(commands::doctor::DoctorArgs),
 
+    /// Generate a scrat config file
+    Init(commands::init::InitArgs),
+
     /// Show package information
     Info(commands::info::InfoArgs),
 
