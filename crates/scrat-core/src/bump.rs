@@ -115,10 +115,11 @@ pub fn plan_bump(
     config: &Config,
     explicit_version: Option<&str>,
 ) -> BumpResult<BumpPlan> {
-    // Step 1: Detect ecosystem
-    let detection = crate::detect::detect_project(project_root).ok_or_else(|| {
+    // Step 1: Detect ecosystem (config override > auto-detect)
+    let detection = crate::detect::resolve_detection(project_root, config).ok_or_else(|| {
         BumpError::Detection(
-            "could not detect project type — is there a Cargo.toml or package.json?".into(),
+            "could not detect project type — use `project.type` in config or select interactively"
+                .into(),
         )
     })?;
 
@@ -234,7 +235,7 @@ impl ReadyBump {
     ) -> BumpResult<BumpOutcome> {
         let mut modified_files = Vec::new();
 
-        // Update version in project files
+        // Update version in project files (Generic has no project files to update)
         match self.detection.ecosystem {
             Ecosystem::Rust => {
                 bump_rust_version(project_root, &self.next, &self.detection)?;
@@ -242,6 +243,9 @@ impl ReadyBump {
             }
             Ecosystem::Node => {
                 return Err(BumpError::UnsupportedEcosystem(Ecosystem::Node));
+            }
+            Ecosystem::Generic => {
+                debug!("generic ecosystem — no project files to bump");
             }
         }
 

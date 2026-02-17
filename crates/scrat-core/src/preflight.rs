@@ -69,8 +69,8 @@ pub fn run_preflight(project_root: &camino::Utf8Path, config: &Config) -> Prefli
     // Check 4: Remote in sync
     checks.push(check_remote_sync());
 
-    // Check 5: Ecosystem detection
-    let detection = detect::detect_project(project_root);
+    // Check 5: Ecosystem detection (config override > auto-detect)
+    let detection = detect::resolve_detection(project_root, config);
     checks.push(check_ecosystem(&detection));
 
     // Check 6: Required tools
@@ -212,8 +212,10 @@ fn check_ecosystem(detection: &Option<ProjectDetection>) -> CheckResult {
     detection.as_ref().map_or_else(
         || CheckResult {
             name: "Project detection".into(),
-            passed: false,
-            message: "No recognized project type (missing Cargo.toml, package.json, etc.)".into(),
+            // Not a hard failure — CLI will prompt for ecosystem selection
+            passed: true,
+            message: "No ecosystem detected — select interactively or set project.type in config"
+                .into(),
         },
         |det| CheckResult {
             name: "Project detection".into(),
@@ -305,8 +307,10 @@ mod tests {
     }
 
     #[test]
-    fn check_ecosystem_none() {
+    fn check_ecosystem_none_passes_with_prompt_hint() {
         let result = check_ecosystem(&None);
-        assert!(!result.passed);
+        // No detection is not a hard failure — CLI will prompt for selection
+        assert!(result.passed);
+        assert!(result.message.contains("select interactively"));
     }
 }

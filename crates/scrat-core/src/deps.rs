@@ -19,7 +19,10 @@ use crate::pipeline::DepChange;
 /// Returns an empty `Vec` if the lockfile doesn't exist or hasn't changed.
 /// Deps diff failure is non-fatal — logs a warning and returns empty.
 pub fn compute_deps(ecosystem: Ecosystem, previous_tag: &str) -> Vec<DepChange> {
-    let lockfile = ecosystem.lockfile_path();
+    let Some(lockfile) = ecosystem.lockfile_path() else {
+        debug!(%ecosystem, "no lockfile for ecosystem, skipping deps diff");
+        return Vec::new();
+    };
 
     let diff = match git::diff_file(previous_tag, lockfile) {
         Ok(d) => d,
@@ -37,6 +40,7 @@ pub fn compute_deps(ecosystem: Ecosystem, previous_tag: &str) -> Vec<DepChange> 
     let changes = match ecosystem {
         Ecosystem::Rust => parse_cargo_lock_diff(&diff),
         Ecosystem::Node => parse_package_lock_diff(&diff),
+        Ecosystem::Generic => Vec::new(),
     };
 
     debug!(lockfile, count = changes.len(), "parsed dep changes");

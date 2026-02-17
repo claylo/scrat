@@ -4,7 +4,7 @@ use clap::Args;
 use owo_colors::OwoColorize;
 use tracing::{debug, instrument};
 
-use scrat_core::config::Config;
+use scrat_core::config::{Config, ProjectConfig};
 use scrat_core::preflight;
 
 /// Arguments for the `preflight` subcommand.
@@ -23,7 +23,23 @@ pub fn cmd_preflight(
 ) -> anyhow::Result<()> {
     debug!(json_output = global_json, "executing preflight command");
 
-    let report = preflight::run_preflight(cwd, config);
+    let mut config = config.clone();
+    let mut report = preflight::run_preflight(cwd, &config);
+
+    // If no ecosystem detected and not in JSON mode, prompt the user
+    if report.detection.is_none() && !global_json {
+        match super::prompt_ecosystem_selection() {
+            Ok(ecosystem) => {
+                // Re-run preflight with the user's ecosystem choice
+                let project = config.project.get_or_insert_with(ProjectConfig::default);
+                project.project_type = Some(ecosystem);
+                report = preflight::run_preflight(cwd, &config);
+            }
+            Err(_) => {
+                // User cancelled — show the original report
+            }
+        }
+    }
 
     if global_json {
         println!("{}", serde_json::to_string_pretty(&report)?);

@@ -70,7 +70,7 @@ pub struct Config {
 ///
 /// Normally auto-detected from marker files in the working directory.
 /// Use this section to override the detected values.
-#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, Deserialize, Serialize, PartialEq, Eq)]
 pub struct ProjectConfig {
     /// Override the detected ecosystem (e.g., `"rust"`, `"node"`).
     #[serde(rename = "type")]

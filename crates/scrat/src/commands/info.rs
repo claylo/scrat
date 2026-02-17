@@ -88,7 +88,7 @@ pub fn cmd_info(
     debug!(json_output = global_json, "executing info command");
 
     let config_info = ConfigInfo::from_config(config, cwd);
-    let detection = detect::detect_project(cwd);
+    let detection = detect::resolve_detection(cwd, config);
 
     let full_info = FullInfo {
         package: info,

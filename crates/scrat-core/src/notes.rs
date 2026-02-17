@@ -81,8 +81,8 @@ pub fn preview_notes(
     config: &Config,
     options: PreviewNotesOptions,
 ) -> Result<PreviewNotesResult, NotesError> {
-    // Detect ecosystem
-    let detection = detect::detect_project(project_root);
+    // Detect ecosystem (config override > auto-detect)
+    let detection = detect::resolve_detection(project_root, config);
     let ecosystem_name = detection
         .as_ref()
         .map(|d| d.ecosystem.to_string())

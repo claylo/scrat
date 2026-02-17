@@ -117,15 +117,26 @@ pub fn cmd_ship(
     let is_dry = options.dry_run;
 
     // Plan the ship (preflight + version resolution)
-    let plan = ship::plan_ship(cwd, config, options).context("ship planning failed")?;
+    let mut plan = ship::plan_ship(cwd, config, options).context("ship planning failed")?;
 
-    // Resolve interactive prompt if needed
+    // If ecosystem detection failed, prompt the user to select one
+    if let ShipPlan::NeedsEcosystemSelection(selection) = plan {
+        let ecosystem =
+            super::prompt_ecosystem_selection().context("ecosystem selection failed")?;
+        plan = ship::resolve_ecosystem_selection(selection, ecosystem)
+            .context("re-planning with selected ecosystem failed")?;
+    }
+
+    // Resolve interactive version prompt if needed
     let ready = match plan {
         ShipPlan::Ready(r) => r,
         ShipPlan::NeedsInteraction(interactive) => {
             let chosen = prompt_interactive_version(&interactive)
                 .context("interactive version selection failed")?;
             ship::resolve_ship_interaction(interactive, chosen)
+        }
+        ShipPlan::NeedsEcosystemSelection(_) => {
+            bail!("ecosystem selection returned NeedsEcosystemSelection again — this is a bug");
         }
     };
 

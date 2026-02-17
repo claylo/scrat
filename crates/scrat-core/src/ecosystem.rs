@@ -15,6 +15,13 @@ pub enum Ecosystem {
     Rust,
     /// Node.js project (detected via `package.json`).
     Node,
+    /// Generic project — no ecosystem-specific behavior.
+    ///
+    /// Selected interactively when auto-detection finds no marker files,
+    /// or via `project.type = "generic"` in config. Skips version-file
+    /// rewrite, deps diff, and registry publish; still does changelog,
+    /// git commit/tag/push, GitHub release, and hooks.
+    Generic,
 }
 
 impl fmt::Display for Ecosystem {
@@ -22,29 +29,42 @@ impl fmt::Display for Ecosystem {
         match self {
             Self::Rust => write!(f, "rust"),
             Self::Node => write!(f, "node"),
+            Self::Generic => write!(f, "generic"),
         }
     }
 }
 
 impl Ecosystem {
     /// Filename that signals this ecosystem when found in a directory.
-    pub const fn marker_file(self) -> &'static str {
+    ///
+    /// Returns `None` for [`Generic`](Self::Generic) which has no marker file.
+    pub const fn marker_file(self) -> Option<&'static str> {
         match self {
-            Self::Rust => "Cargo.toml",
-            Self::Node => "package.json",
+            Self::Rust => Some("Cargo.toml"),
+            Self::Node => Some("package.json"),
+            Self::Generic => None,
         }
     }
 
     /// Primary lockfile for this ecosystem, relative to project root.
-    pub const fn lockfile_path(self) -> &'static str {
+    ///
+    /// Returns `None` for [`Generic`](Self::Generic) which has no lockfile.
+    pub const fn lockfile_path(self) -> Option<&'static str> {
         match self {
-            Self::Rust => "Cargo.lock",
-            Self::Node => "package-lock.json",
+            Self::Rust => Some("Cargo.lock"),
+            Self::Node => Some("package-lock.json"),
+            Self::Generic => None,
         }
     }
 
-    /// All recognized ecosystems, in detection priority order.
-    pub const ALL: &[Self] = &[Self::Rust, Self::Node];
+    /// Ecosystems that can be auto-detected via marker files.
+    ///
+    /// [`Generic`](Self::Generic) is excluded — it is only selected
+    /// interactively or via config override.
+    pub const AUTO_DETECTABLE: &[Self] = &[Self::Rust, Self::Node];
+
+    /// All ecosystem variants, including [`Generic`](Self::Generic).
+    pub const ALL: &[Self] = &[Self::Rust, Self::Node, Self::Generic];
 }
 
 /// Version-determination strategy.
@@ -117,6 +137,24 @@ pub struct ProjectDetection {
     pub tools: DetectedTools,
 }
 
+impl ProjectDetection {
+    /// Build a [`Generic`](Ecosystem::Generic) detection with the given
+    /// version strategy. All tool commands are empty/None.
+    pub const fn generic(version_strategy: VersionStrategy) -> Self {
+        Self {
+            ecosystem: Ecosystem::Generic,
+            version_strategy,
+            tools: DetectedTools {
+                test_cmd: String::new(),
+                build_cmd: String::new(),
+                publish_cmd: None,
+                bump_cmd: None,
+                changelog_tool: None,
+            },
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -125,12 +163,14 @@ mod tests {
     fn ecosystem_display() {
         assert_eq!(Ecosystem::Rust.to_string(), "rust");
         assert_eq!(Ecosystem::Node.to_string(), "node");
+        assert_eq!(Ecosystem::Generic.to_string(), "generic");
     }
 
     #[test]
     fn ecosystem_marker_files() {
-        assert_eq!(Ecosystem::Rust.marker_file(), "Cargo.toml");
-        assert_eq!(Ecosystem::Node.marker_file(), "package.json");
+        assert_eq!(Ecosystem::Rust.marker_file(), Some("Cargo.toml"));
+        assert_eq!(Ecosystem::Node.marker_file(), Some("package.json"));
+        assert_eq!(Ecosystem::Generic.marker_file(), None);
     }
 
     #[test]
@@ -154,8 +194,9 @@ mod tests {
 
     #[test]
     fn lockfile_paths() {
-        assert_eq!(Ecosystem::Rust.lockfile_path(), "Cargo.lock");
-        assert_eq!(Ecosystem::Node.lockfile_path(), "package-lock.json");
+        assert_eq!(Ecosystem::Rust.lockfile_path(), Some("Cargo.lock"));
+        assert_eq!(Ecosystem::Node.lockfile_path(), Some("package-lock.json"));
+        assert_eq!(Ecosystem::Generic.lockfile_path(), None);
     }
 
     #[test]
@@ -164,6 +205,11 @@ mod tests {
         assert_eq!(json, "\"rust\"");
         let parsed: Ecosystem = serde_json::from_str(&json).unwrap();
         assert_eq!(parsed, Ecosystem::Rust);
+
+        let json = serde_json::to_string(&Ecosystem::Generic).unwrap();
+        assert_eq!(json, "\"generic\"");
+        let parsed: Ecosystem = serde_json::from_str(&json).unwrap();
+        assert_eq!(parsed, Ecosystem::Generic);
     }
 
     #[test]
