@@ -554,35 +554,59 @@ impl ReadyShip {
         )?;
 
         // ── Git Phase (commit + tag + push) ──
-        hooks_run += run_phase_hooks(
-            hooks_config.and_then(|h| h.pre_tag.as_deref()),
-            &hook_ctx,
-            project_root,
-            ShipPhase::Git,
-            is_dry,
-            &mut on_event,
-            &mut ctx,
-        )?;
+        if !self.options.no_git {
+            hooks_run += run_phase_hooks(
+                hooks_config.and_then(|h| h.pre_tag.as_deref()),
+                &hook_ctx,
+                project_root,
+                ShipPhase::Git,
+                is_dry,
+                &mut on_event,
+                &mut ctx,
+            )?;
+        }
 
         on_event(ShipEvent::PhaseStarted(ShipPhase::Git));
-        let git_outcome = if is_dry {
+        let git_outcome = if self.options.no_git {
+            PhaseOutcome::Skipped {
+                reason: "--no-git flag".into(),
+            }
+        } else if is_dry {
+            let tag_msg = if self.options.no_tag {
+                String::new()
+            } else {
+                format!(", tag {tag}")
+            };
             let push_msg = if self.options.no_push {
                 " (no push)"
             } else {
                 " + push"
             };
             PhaseOutcome::Success {
-                message: format!("Would commit, tag {tag}{push_msg}"),
+                message: format!("Would commit{tag_msg}{push_msg}"),
             }
         } else {
-            let git_result = run_git_phase(project_root, &tag, version, self.options.no_push)?;
+            let git_result = run_git_phase(
+                project_root,
+                &tag,
+                version,
+                self.options.no_push,
+                self.options.no_tag,
+            )?;
             ctx.record_git(Some(git_result.hash.clone()), git_result.branch.clone());
-            let msg = if git_result.pushed {
-                format!("Committed {}, tagged {tag}, pushed", git_result.hash)
+            let tag_part = if self.options.no_tag {
+                String::new()
             } else {
-                format!("Committed {}, tagged {tag} (push skipped)", git_result.hash)
+                format!(", tagged {tag}")
             };
-            PhaseOutcome::Success { message: msg }
+            let push_part = if git_result.pushed {
+                ", pushed"
+            } else {
+                " (push skipped)"
+            };
+            PhaseOutcome::Success {
+                message: format!("Committed {}{tag_part}{push_part}", git_result.hash),
+            }
         };
         on_event(ShipEvent::PhaseCompleted(
             ShipPhase::Git,
@@ -590,15 +614,17 @@ impl ReadyShip {
         ));
         phases.push((ShipPhase::Git, git_outcome));
 
-        hooks_run += run_phase_hooks(
-            hooks_config.and_then(|h| h.post_tag.as_deref()),
-            &hook_ctx,
-            project_root,
-            ShipPhase::Git,
-            is_dry,
-            &mut on_event,
-            &mut ctx,
-        )?;
+        if !self.options.no_git {
+            hooks_run += run_phase_hooks(
+                hooks_config.and_then(|h| h.post_tag.as_deref()),
+                &hook_ctx,
+                project_root,
+                ShipPhase::Git,
+                is_dry,
+                &mut on_event,
+                &mut ctx,
+            )?;
+        }
 
         // ── Release Phase (GitHub release) ──
         hooks_run += run_phase_hooks(
@@ -899,19 +925,22 @@ fn run_git_phase(
     tag: &str,
     version: &Version,
     no_push: bool,
+    no_tag: bool,
 ) -> ShipResult<GitPhaseResult> {
     // Stage and commit all modified files
     let commit_msg = format!("chore: release {version}");
     let hash = git::commit(&["."], &commit_msg)?;
 
-    // Create annotated tag
-    let tag_msg = format!("Release {version}");
-    git::create_tag(tag, &tag_msg)?;
+    // Create annotated tag (unless skipped)
+    if !no_tag {
+        let tag_msg = format!("Release {version}");
+        git::create_tag(tag, &tag_msg)?;
+    }
 
-    // Push if requested
+    // Push if requested (only push tags if we created one)
     if !no_push {
         let branch = git::current_branch()?.unwrap_or_else(|| "HEAD".into());
-        git::push("origin", &branch, true)?;
+        git::push("origin", &branch, !no_tag)?;
         Ok(GitPhaseResult {
             hash,
             branch: Some(branch),
