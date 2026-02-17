@@ -1366,6 +1366,7 @@ name = "scrat-core"
 version = "0.1.0"
 dependencies = [
  "camino",
+ "clap",
  "directories",
  "figment",
  "semver",
