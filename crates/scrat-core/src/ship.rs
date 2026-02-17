@@ -682,9 +682,7 @@ impl ReadyShip {
 
         // Resolve release config for both dry-run and real execution
         let release_cfg = self.config.release.as_ref();
-        let github_release = release_cfg
-            .and_then(|r| r.github_release)
-            .unwrap_or(true);
+        let github_release = release_cfg.and_then(|r| r.github_release).unwrap_or(true);
         let draft = self
             .options
             .draft_override
@@ -694,9 +692,7 @@ impl ReadyShip {
             .and_then(|r| r.title.as_deref())
             .map(|t| hooks::interpolate_command(t, &hook_ctx));
         let discussion_category = release_cfg.and_then(|r| r.discussion_category.as_deref());
-        let assets = release_cfg
-            .and_then(|r| r.assets.as_deref())
-            .unwrap_or(&[]);
+        let assets = release_cfg.and_then(|r| r.assets.as_deref()).unwrap_or(&[]);
 
         on_event(ShipEvent::PhaseStarted(ShipPhase::Release));
         let release_outcome = if self.options.no_release {
@@ -1089,11 +1085,7 @@ fn release_exists(tag: &str, project_root: &Utf8Path) -> bool {
 }
 
 /// Upload assets to an existing release, replacing any with the same name.
-fn upload_release_assets(
-    tag: &str,
-    assets: &[String],
-    project_root: &Utf8Path,
-) -> ShipResult<()> {
+fn upload_release_assets(tag: &str, assets: &[String], project_root: &Utf8Path) -> ShipResult<()> {
     for asset in assets {
         // Try to delete existing asset (ignore failure — may not exist)
         let basename = std::path::Path::new(asset)
@@ -1164,7 +1156,11 @@ fn run_release_phase(opts: &ReleaseOptions<'_>) -> ShipResult<ReleasePhaseResult
         }
 
         let raw_url = String::from_utf8_lossy(&output.stdout).trim().to_string();
-        let url = if raw_url.is_empty() { None } else { Some(raw_url) };
+        let url = if raw_url.is_empty() {
+            None
+        } else {
+            Some(raw_url)
+        };
         Ok(ReleasePhaseResult { url, edited: true })
     } else {
         debug!(tag = opts.tag, "creating new release");
@@ -1188,7 +1184,11 @@ fn run_release_phase(opts: &ReleaseOptions<'_>) -> ShipResult<ReleasePhaseResult
         }
 
         let raw_url = String::from_utf8_lossy(&output.stdout).trim().to_string();
-        let url = if raw_url.is_empty() { None } else { Some(raw_url) };
+        let url = if raw_url.is_empty() {
+            None
+        } else {
+            Some(raw_url)
+        };
         Ok(ReleasePhaseResult { url, edited: false })
     }
 }

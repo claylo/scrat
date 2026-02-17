@@ -796,10 +796,7 @@ discussion_category = "releases"
         let release = config.release.unwrap();
         assert_eq!(release.draft, Some(true));
         assert_eq!(release.title.as_deref(), Some("{repo} {tag}"));
-        assert_eq!(
-            release.discussion_category.as_deref(),
-            Some("releases")
-        );
+        assert_eq!(release.discussion_category.as_deref(), Some("releases"));
     }
 
     #[test]
