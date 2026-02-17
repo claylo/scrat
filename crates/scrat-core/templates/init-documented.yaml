@@ -1,0 +1,45 @@
+# scrat configuration
+# https://github.com/claylo/scrat
+
+# ─── Logging ────────────────────────────────────────────────────────────────
+# log_level: info
+# log_dir: /path/to/logs
+
+# ─── Project ────────────────────────────────────────────────────────────────
+{{project_section}}
+
+# ─── Version Strategy ──────────────────────────────────────────────────────
+# Auto-detected from cliff.toml / cog.toml presence.
+# Override with:
+# version:
+#   strategy: conventional-commits  # or interactive, explicit
+
+# ─── Command Overrides ─────────────────────────────────────────────────────
+{{commands_section}}
+
+# ─── Release ────────────────────────────────────────────────────────────────
+{{release_section}}
+
+# ─── Hooks ──────────────────────────────────────────────────────────────────
+# Commands run at each phase of the release workflow.
+# Variables: {version}, {prev_version}, {tag}, {changelog_path}, {owner}, {repo}
+# Commands run in parallel by default. Prefix with "sync:" for a barrier.
+# Prefix with "filter:" for JSON stdin/stdout pipeline mutation.
+#
+# hooks:
+#   pre_bump: []
+#   post_bump:
+#     - "generate-release-card --version {version} -o release-card.png"
+#     - "sync: gh release edit {tag} --draft=false"
+#   pre_publish: []
+#   post_publish: []
+#   pre_tag: []
+#   post_tag: []
+#   pre_release: []
+#   post_release: []
+#   pre_ship: []
+#   post_ship: []
+
+# ─── Ship Behavior ─────────────────────────────────────────────────────────
+# ship:
+#   confirm: true
