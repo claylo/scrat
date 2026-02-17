@@ -6,8 +6,8 @@ use inquire::Select;
 use owo_colors::OwoColorize;
 use tracing::{debug, instrument};
 
-use scrat_core::bump::{self, BumpPlan, InteractiveBump};
-use scrat_core::config::Config;
+use scrat_core::bump::{self, BumpError, BumpPlan, InteractiveBump};
+use scrat_core::config::{Config, ProjectConfig};
 
 /// Arguments for the `bump` subcommand.
 #[derive(Args, Debug, Default)]
@@ -36,8 +36,20 @@ pub fn cmd_bump(
     debug!(json_output = global_json, "executing bump command");
 
     // Plan the bump (all logic in core)
-    let plan =
-        bump::plan_bump(cwd, config, args.version.as_deref()).context("bump planning failed")?;
+    // If ecosystem detection fails, prompt the user to select one
+    let mut config = config.clone();
+    let plan = match bump::plan_bump(cwd, &config, args.version.as_deref()) {
+        Ok(plan) => plan,
+        Err(BumpError::Detection(_)) => {
+            let ecosystem =
+                super::prompt_ecosystem_selection().context("ecosystem selection failed")?;
+            let project = config.project.get_or_insert_with(ProjectConfig::default);
+            project.project_type = Some(ecosystem);
+            bump::plan_bump(cwd, &config, args.version.as_deref())
+                .context("bump planning failed")?
+        }
+        Err(e) => return Err(e).context("bump planning failed"),
+    };
 
     // Resolve interactive prompt if needed
     let ready = match plan {

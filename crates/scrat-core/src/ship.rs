@@ -217,8 +217,11 @@ pub struct ShipOutcome {
 pub enum ShipPlan {
     /// Version fully determined, ready to execute.
     Ready(ReadyShip),
-    /// Interactive mode — the CLI must prompt the user.
+    /// Interactive mode — the CLI must prompt for version selection.
     NeedsInteraction(InteractiveShip),
+    /// Ecosystem could not be auto-detected — the CLI must prompt the user
+    /// to select one (e.g., Generic), then re-plan with the chosen ecosystem.
+    NeedsEcosystemSelection(NeedsEcosystemSelection),
 }
 
 /// A ship plan that is ready to execute.
@@ -243,6 +246,17 @@ pub struct InteractiveShip {
     pub options: ShipOptions,
     /// Loaded configuration.
     pub config: Config,
+}
+
+/// Ecosystem auto-detection failed — the CLI must prompt the user.
+#[derive(Debug)]
+pub struct NeedsEcosystemSelection {
+    /// Ship workflow options (preserved for re-planning after selection).
+    pub options: ShipOptions,
+    /// Loaded configuration (preserved for re-planning after selection).
+    pub config: Config,
+    /// Project root path.
+    pub project_root: camino::Utf8PathBuf,
 }
 
 // ──────────────────────────────────────────────
@@ -273,7 +287,20 @@ pub fn plan_ship(
     }
 
     // Phase 2: Version resolution (delegates to bump::plan_bump)
-    let bump_plan = bump::plan_bump(project_root, config, options.explicit_version.as_deref())?;
+    let bump_plan = match bump::plan_bump(project_root, config, options.explicit_version.as_deref())
+    {
+        Ok(plan) => plan,
+        Err(bump::BumpError::Detection(_)) => {
+            // Ecosystem not detected — signal the CLI to prompt for selection
+            debug!("ecosystem detection failed, requesting user selection");
+            return Ok(ShipPlan::NeedsEcosystemSelection(NeedsEcosystemSelection {
+                options,
+                config: config.clone(),
+                project_root: project_root.to_owned(),
+            }));
+        }
+        Err(e) => return Err(e.into()),
+    };
 
     match bump_plan {
         bump::BumpPlan::Ready(ready_bump) => {
@@ -293,6 +320,25 @@ pub fn plan_ship(
             }))
         }
     }
+}
+
+/// Resolve an ecosystem selection by re-planning with the chosen ecosystem.
+///
+/// Called after the CLI prompts the user to select an ecosystem (e.g., Generic).
+/// Injects the chosen ecosystem into the config and re-runs [`plan_ship`].
+pub fn resolve_ecosystem_selection(
+    selection: NeedsEcosystemSelection,
+    ecosystem: crate::ecosystem::Ecosystem,
+) -> ShipResult<ShipPlan> {
+    use crate::config::ProjectConfig;
+
+    // Inject the user's ecosystem choice into config
+    let mut config = selection.config;
+    let project = config.project.get_or_insert_with(ProjectConfig::default);
+    project.project_type = Some(ecosystem);
+
+    // Re-plan with the overridden config
+    plan_ship(&selection.project_root, &config, selection.options)
 }
 
 /// Resolve an interactive ship plan with the user's chosen version.

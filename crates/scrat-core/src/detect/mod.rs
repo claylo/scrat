@@ -26,9 +26,39 @@ use tracing::{debug, instrument};
 
 use crate::ecosystem::{ChangelogTool, Ecosystem, ProjectDetection, VersionStrategy};
 
+/// Resolve ecosystem detection, honoring config overrides.
+///
+/// Priority:
+/// 1. `config.project.project_type` override → build detection for that ecosystem
+/// 2. Auto-detect via marker files → full ecosystem-specific detection
+/// 3. `None` → caller must prompt the user
+#[instrument(skip(config), fields(root = %project_root))]
+pub fn resolve_detection(
+    project_root: &Utf8Path,
+    config: &crate::config::Config,
+) -> Option<ProjectDetection> {
+    // Config override takes priority
+    if let Some(ref project) = config.project
+        && let Some(ecosystem) = project.project_type
+    {
+        debug!(%ecosystem, "using ecosystem from config override");
+        let version_strategy = detect_version_strategy(project_root);
+        let detection = match ecosystem {
+            Ecosystem::Rust => rust::detect_rust(project_root, version_strategy),
+            Ecosystem::Node => detect_node_stub(version_strategy),
+            Ecosystem::Generic => ProjectDetection::generic(version_strategy),
+        };
+        return Some(detection);
+    }
+
+    // Fall back to auto-detection
+    detect_project(project_root)
+}
+
 /// Detect the project ecosystem and available tooling from `project_root`.
 ///
 /// Returns `None` if no recognized marker file is found.
+/// Prefer [`resolve_detection`] which also honors config overrides.
 #[instrument(fields(root = %project_root))]
 pub fn detect_project(project_root: &Utf8Path) -> Option<ProjectDetection> {
     let ecosystem = detect_ecosystem(project_root)?;
@@ -40,16 +70,21 @@ pub fn detect_project(project_root: &Utf8Path) -> Option<ProjectDetection> {
     let detection = match ecosystem {
         Ecosystem::Rust => rust::detect_rust(project_root, version_strategy),
         Ecosystem::Node => detect_node_stub(version_strategy),
+        Ecosystem::Generic => ProjectDetection::generic(version_strategy),
     };
 
     Some(detection)
 }
 
 /// Identify the ecosystem by scanning for marker files.
+///
+/// Only checks [`Ecosystem::AUTO_DETECTABLE`] variants (those with marker
+/// files). [`Ecosystem::Generic`] is never auto-detected.
 fn detect_ecosystem(project_root: &Utf8Path) -> Option<Ecosystem> {
-    for ecosystem in Ecosystem::ALL {
-        let marker = project_root.join(ecosystem.marker_file());
-        if marker.is_file() {
+    for ecosystem in Ecosystem::AUTO_DETECTABLE {
+        if let Some(marker) = ecosystem.marker_file()
+            && project_root.join(marker).is_file()
+        {
             return Some(*ecosystem);
         }
     }
@@ -62,7 +97,7 @@ fn detect_ecosystem(project_root: &Utf8Path) -> Option<Ecosystem> {
 /// 1. `cliff.toml` → `ConventionalCommits(GitCliff)`
 /// 2. `cog.toml`   → `ConventionalCommits(Cog)`
 /// 3. Neither      → `Interactive`
-fn detect_version_strategy(project_root: &Utf8Path) -> VersionStrategy {
+pub fn detect_version_strategy(project_root: &Utf8Path) -> VersionStrategy {
     if project_root.join("cliff.toml").is_file() {
         debug!("found cliff.toml");
         return VersionStrategy::ConventionalCommits {
@@ -94,6 +129,19 @@ fn detect_node_stub(version_strategy: VersionStrategy) -> ProjectDetection {
             bump_cmd: Some("npm version --no-git-tag-version".into()),
             changelog_tool: None,
         },
+    }
+}
+
+/// Build a [`ProjectDetection`] for a user-selected ecosystem.
+///
+/// Called after the CLI prompts the user to choose an ecosystem when
+/// auto-detection returns `None`.
+pub fn build_detection(project_root: &Utf8Path, ecosystem: Ecosystem) -> ProjectDetection {
+    let version_strategy = detect_version_strategy(project_root);
+    match ecosystem {
+        Ecosystem::Rust => rust::detect_rust(project_root, version_strategy),
+        Ecosystem::Node => detect_node_stub(version_strategy),
+        Ecosystem::Generic => ProjectDetection::generic(version_strategy),
     }
 }
 

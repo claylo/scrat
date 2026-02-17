@@ -5,18 +5,498 @@
 [![docs.rs](https://docs.rs/scrat/badge.svg)](https://docs.rs/scrat)
 [![MSRV](https://img.shields.io/badge/MSRV-1.88.0-blue.svg)](https://github.com/claylo/scrat)
 
-Release management tooling focused on sanity retention
+**Release management tooling focused on sanity retention.**
+
+scrat is a batteries-included release pipeline for projects that use git tags and GitHub releases.
+It detects your ecosystem,
+diffs your dependencies,
+collects stats,
+renders release notes,
+bumps versions,
+commits, tags, pushes,
+and creates a GitHub release—all in one command.
+Every step is on by default, every step is skippable, and hooks let you bolt on anything custom.
+
+Think of it as [np](https://github.com/sindresorhus/np) for any ecosystem,
+with built-in release notes via [git-cliff](https://git-cliff.org/).
 
 
-## Features
+## Table of Contents
+
+- [Why](#why)
+- [Quick Start](#quick-start)
+- [The Pipeline](#the-pipeline)
+- [Commands](#commands)
+- [Configuration](#configuration)
+- [Hooks](#hooks)
+- [CLI Reference](#cli-reference)
+- [Installation](#installation)
+- [Development](#development)
+- [License](#license)
 
 
-- **Hierarchical Configuration** - Automatic config discovery from project directories up to user home
+## Why
 
-- **Structured Logging** - Daily-rotated JSONL log files
-- **JSON Output** - Machine-readable output for scripting and automation
-- **Shell Completions** - Tab completion for Bash, Zsh, Fish, and PowerShell
-- **Man Pages** - Unix-style documentation
+Every release I've ever done by hand has the same steps:
+run tests, bump versions, update the changelog, commit, tag, push, create a GitHub release,
+attach assets, and try not to forget something.
+Most tools automate one or two of those steps.
+scrat automates all of them—and the ones it doesn't know about, you wire up with hooks.
+
+**Design principles:**
+
+- **Batteries included, everything optional.**
+  Every built-in step is on by default.
+  Pass `--no-<step>` to skip it.
+  Set a value in config to override the built-in behavior.
+  Or disable it entirely.
+- **Thin CLI, fat core.**
+  The binary is a thin UI layer.
+  All orchestration lives in `scrat-core` so other tools can embed it.
+- **Hooks over built-ins for custom stuff.**
+  scrat doesn't know about your postcard generator or your quote corpus.
+  Declare shell commands as hooks—they run at every phase boundary with variable interpolation.
+- **Zero config works. Override what you want.**
+  Auto-detection handles ecosystem, version strategy, test commands, and publish commands.
+  Config files only exist to override the defaults.
+
+
+## Quick Start
+
+```bash
+# Install
+cargo install scrat
+
+# See what scrat detects about your project
+scrat info
+
+# Check if you're ready to release
+scrat preflight
+
+# Preview release notes without shipping
+scrat notes
+
+# Dry run the full pipeline
+scrat ship --dry-run
+
+# Ship it
+scrat ship
+```
+
+`scrat ship` is the main event.
+It runs every stage below, shows you the plan, asks for confirmation, and executes.
+
+
+## The Pipeline
+
+`scrat ship` runs these stages in order.
+Each stage feeds structured data into a `PipelineContext` that flows through the whole pipeline.
+Hooks can read and mutate this context at every phase boundary.
+
+### 1. Preflight
+
+Checks release readiness before anything else runs.
+
+- Clean working directory (no uncommitted changes)
+- On the correct release branch (`main` or `master`, configurable)
+- git-cliff installed (required for release notes)
+
+If any check fails, the pipeline stops.
+Run `scrat preflight` standalone to diagnose issues.
+
+### 2. Version Resolution
+
+Determines the next version.
+Three strategies, auto-detected:
+
+| Strategy | When | How |
+|----------|------|-----|
+| **Conventional Commits** | `cliff.toml` present | Analyzes commit messages to determine major/minor/patch |
+| **Explicit** | `--version 1.2.3` passed | Uses exactly what you give it |
+| **Interactive** | Fallback | Shows recent commits, offers version candidates, you pick |
+
+scrat reads the current version from your project files
+(`Cargo.toml`, `package.json`, etc.)
+and computes candidates from there.
+
+### 3. Test
+
+Runs your test suite.
+The command is auto-detected per ecosystem:
+
+| Ecosystem | Default Command |
+|-----------|----------------|
+| Rust | `cargo test` |
+| Node | `npm test` |
+| PHP (Composer) | `composer test` |
+| Python | `pytest` |
+| Go | `go test ./...` |
+
+Override with `commands.test` in config.
+Skip with `--no-test`.
+
+### 4. Bump
+
+Updates version numbers in project files and generates the changelog.
+
+- Writes the new version to `Cargo.toml`, `package.json`, etc.
+- Runs `git-cliff` to update `CHANGELOG.md`
+- Reports which files were modified
+
+Skip changelog generation with `--no-changelog`.
+Run `scrat bump` standalone to bump without shipping.
+
+### 5. Publish
+
+Publishes to a package registry.
+Auto-detected:
+
+| Ecosystem | Default Command |
+|-----------|----------------|
+| Rust | `cargo publish` |
+| Node | `npm publish` |
+
+Skip with `--no-publish`.
+Override with `commands.publish` in config.
+
+### 6. Dependency Diff
+
+Diffs lockfiles between the previous tag and HEAD to find what changed.
+Supports:
+
+- `Cargo.lock`
+- `package-lock.json`
+- `composer.lock`
+- `Gemfile.lock`
+- `go.sum`
+- `requirements.txt` / `poetry.lock`
+
+The diff parses `git diff` output—not the full lockfile format—so it's fast
+and doesn't need ecosystem-specific parsers.
+Results feed into release notes automatically.
+
+Skip with `--no-deps`.
+
+### 7. Stats Collection
+
+Gathers release statistics from git:
+
+- Commit count
+- Files changed, insertions, deletions
+- Contributors and their commit counts
+
+Uses `git diff --shortstat` and `git shortlog`.
+Results feed into release notes.
+
+Skip with `--no-stats`.
+
+### 8. Release Notes
+
+Renders release notes using a two-pass git-cliff pattern:
+
+1. `git-cliff --unreleased --context` produces JSON with commits grouped by type
+2. scrat injects extra data (deps, stats, metadata) into the context's `extra` field
+3. `git-cliff --from-context - --body <template>` renders the final markdown
+
+scrat ships a built-in template with:
+breaking changes, grouped commits with emoji,
+dependency changes (updated/added/removed),
+a stats table, and a "nerd drawer" with contributor details.
+
+Point to your own template with `release.notes_template` in config
+or `--template` on `scrat notes`.
+
+Skip with `--no-notes`.
+Falls back to `--generate-notes` (GitHub's auto-generated notes) if rendering fails.
+
+### 9. Git
+
+Commits, tags, and pushes.
+
+- `git add . && git commit -m "chore: release {version}"`
+- `git tag -a v{version} -m "Release {version}"`
+- `git push origin {branch} && git push origin --tags`
+
+Fine-grained control:
+
+| Flag | Effect |
+|------|--------|
+| `--no-git` | Skip entire phase (commit, tag, push) |
+| `--no-tag` | Commit and push, but don't create a tag |
+| `--no-push` | Commit and tag locally, don't push |
+
+### 10. GitHub Release
+
+Creates (or updates) a GitHub release using `gh`.
+
+- **Auto-detects edit vs. create:**
+  if a release already exists for the tag, it edits and re-uploads assets instead of failing.
+  This makes `scrat ship` safe to re-run after a partial failure.
+- **Draft by default:**
+  releases are created as drafts so you can review before publishing.
+  Publish with `gh release edit <tag> --draft=false`.
+- **Configurable title:**
+  `release.title = "{repo} {tag}"` with hook-style variable interpolation.
+- **Assets:**
+  declare `release.assets = ["dist/app.tar.gz", "checksums.txt"]` in config.
+  Hook commands produce these files; scrat attaches them.
+
+Skip with `--no-release`.
+Override draft behavior with `--draft` / `--no-draft`.
+
+
+## Commands
+
+### `scrat ship`
+
+The full release pipeline.
+Runs all stages above, with confirmation prompt.
+
+```bash
+scrat ship                    # interactive — asks for confirmation
+scrat ship --dry-run          # preview without changes
+scrat ship --version 2.0.0    # explicit version
+scrat ship --no-publish -y    # skip publish, skip confirmation
+scrat ship --draft            # force draft mode (overrides config)
+```
+
+### `scrat notes`
+
+Renders release notes without shipping.
+Useful for previewing what the notes will look like.
+
+```bash
+scrat notes                          # preview notes for current version
+scrat notes --from v1.0.0            # diff against specific tag
+scrat notes --version 2.0.0          # render as if releasing 2.0.0
+scrat notes --template my-notes.tera # use custom template
+scrat notes --json                   # output raw context as JSON
+```
+
+### `scrat bump`
+
+Bumps version and generates changelog without shipping.
+
+```bash
+scrat bump                    # interactive version selection
+scrat bump --version 1.2.3    # explicit version
+scrat bump --dry-run          # preview without changes
+scrat bump --no-changelog     # skip changelog generation
+```
+
+### `scrat preflight`
+
+Checks release readiness.
+
+```bash
+scrat preflight               # run all checks
+scrat preflight --json        # machine-readable output
+```
+
+### `scrat info`
+
+Shows project information: detected ecosystem, version, tools, config paths.
+
+```bash
+scrat info                    # human-readable
+scrat info --json             # machine-readable
+```
+
+### `scrat doctor`
+
+Diagnoses configuration and environment issues.
+
+
+## Configuration
+
+Config files are discovered automatically.
+Precedence (highest first):
+
+1. Explicit file via `--config <path>`
+2. `.scrat.toml` / `scrat.toml` in current directory (walks up to `.git` boundary)
+3. `~/.config/scrat/config.toml` (user config)
+4. Built-in defaults
+
+**Supported formats:** TOML, YAML, JSON.
+
+Zero config works.
+Everything below is optional—only set what you want to override.
+
+### Full Reference
+
+```toml
+# Log level: debug, info, warn, error
+log_level = "info"
+
+# Directory for JSONL log files (default: platform-specific)
+# log_dir = "/var/log/scrat"
+
+[project]
+# Override detected ecosystem: rust, node, php, python, go
+# type = "rust"
+# Override release branch (default: auto-detect main/master)
+# release_branch = "main"
+
+[version]
+# Override version strategy: conventional-commits, interactive, explicit
+# strategy = "conventional-commits"
+
+[commands]
+# Override per-phase commands (default: auto-detected per ecosystem)
+# test = "just test"
+# build = "cargo build --release"
+# publish = "cargo publish"
+# clean = "cargo clean"
+
+[release]
+# Create GitHub releases (default: true)
+# github_release = true
+
+# Create as draft — review before publishing (default: true)
+# draft = true
+
+# Title format with variable interpolation (default: tag name)
+# title = "{repo} {tag}"
+
+# GitHub Discussions category (only for new releases)
+# discussion_category = "releases"
+
+# Custom git-cliff template for release notes
+# notes_template = "templates/my-notes.tera"
+
+# Files to attach to the GitHub release
+# assets = ["dist/release-card.png", "dist/checksums.txt"]
+
+[hooks]
+# Shell commands at each phase boundary.
+# See the Hooks section for details.
+# post_bump = ["ll-graphics generate --version {version} --output dist/release-card.png"]
+
+[ship]
+# Prompt for confirmation before executing (default: true)
+# Set to false for CI/scripted use. --yes/-y flag also skips.
+# confirm = true
+```
+
+
+## Hooks
+
+Hooks are shell commands that run at phase boundaries during the ship workflow.
+Declare them in config as lists of strings.
+
+### Hook Points
+
+14 hook points across 7 phases:
+
+| Hook | When |
+|------|------|
+| `pre_ship` / `post_ship` | Before/after the entire workflow |
+| `pre_test` / `post_test` | Before/after the test phase |
+| `pre_bump` / `post_bump` | Before/after version bump + changelog |
+| `pre_publish` / `post_publish` | Before/after registry publish |
+| `pre_tag` / `post_tag` | Before/after git commit + tag + push |
+| `pre_release` / `post_release` | Before/after GitHub release creation |
+
+### Variable Interpolation
+
+Commands support `{var}` placeholders:
+
+| Variable | Example Value |
+|----------|---------------|
+| `{version}` | `1.2.3` |
+| `{prev_version}` | `1.1.0` |
+| `{tag}` | `v1.2.3` |
+| `{changelog_path}` | `CHANGELOG.md` |
+| `{owner}` | `claylo` |
+| `{repo}` | `scrat` |
+
+### Execution Model
+
+Commands run **in parallel** by default.
+Two prefixes alter execution:
+
+**`sync:` — barrier.**
+All prior commands finish, the sync command runs alone, then subsequent commands resume in parallel.
+
+```toml
+[hooks]
+post_bump = [
+    "generate-image --version {version}",
+    "generate-checksums",
+    "sync: validate-artifacts",  # waits for both above, runs alone
+    "upload-to-cdn",             # resumes parallel
+]
+```
+
+**`filter:` — barrier + JSON piping.**
+Like `sync:`, but the command also receives the full `PipelineContext` as JSON on stdin
+and must return valid JSON on stdout.
+The output replaces the pipeline context.
+This lets you mutate built-in step output without replacing the whole step.
+
+```toml
+[hooks]
+post_bump = [
+    "filter: jq '[.dependencies[] | select(.name != \"dev-dep\")]'",
+]
+```
+
+### Example: Full Hook Setup
+
+```toml
+[hooks]
+post_bump = [
+    "ll-graphics release-postcard --tag {tag} --output dist/release-card.png",
+]
+pre_release = [
+    "sync: test -f dist/release-card.png",
+]
+
+[release]
+assets = ["dist/release-card.png"]
+```
+
+
+## CLI Reference
+
+### Global Options
+
+| Flag | Description |
+|------|-------------|
+| `-c, --config <FILE>` | Explicit config file path |
+| `-C, --chdir <DIR>` | Run as if started in DIR |
+| `-v, --verbose` | More detail (repeatable: `-vv`) |
+| `-q, --quiet` | Only print errors |
+| `--json` | Machine-readable JSON output |
+| `--color <auto\|always\|never>` | Colorize output |
+
+### `scrat ship` Flags
+
+**Step control** — every pipeline step is skippable:
+
+| Flag | Skips |
+|------|-------|
+| `--no-test` | Test phase |
+| `--no-changelog` | Changelog generation (during bump) |
+| `--no-publish` | Registry publish |
+| `--no-deps` | Dependency diff |
+| `--no-stats` | Stats collection |
+| `--no-notes` | Release notes rendering |
+| `--no-tag` | Git tag (still commits and pushes) |
+| `--no-push` | Git push (still commits and tags locally) |
+| `--no-git` | Entire git phase (commit, tag, push) |
+| `--no-release` | GitHub release creation |
+
+**Other options:**
+
+| Flag | Description |
+|------|-------------|
+| `--version <VERSION>` | Set version explicitly |
+| `--draft` | Force draft mode (overrides config) |
+| `--no-draft` | Force published mode (overrides config) |
+| `--dry-run` | Preview without making changes |
+| `-y, --yes` | Skip confirmation prompt |
+
 
 ## Installation
 
@@ -28,9 +508,10 @@ brew install claylo/brew/scrat
 
 ### Pre-built Binaries
 
-Download the latest release for your platform from the [releases page](https://github.com/claylo/scrat/releases).
+Download from the [releases page](https://github.com/claylo/scrat/releases).
 
-Binaries are available for:
+Binaries available for:
+
 - macOS (Apple Silicon and Intel)
 - Linux (x86_64 and ARM64, glibc and musl)
 - Windows (x86_64 and ARM64)
@@ -41,258 +522,76 @@ Binaries are available for:
 cargo install scrat
 ```
 
-Or build from source:
-
-```bash
-git clone https://github.com/claylo/scrat.git
-cd scrat
-cargo install --path crates/scrat
-```
-
 ### Shell Completions
 
-Shell completions are included in release archives and Homebrew installs. For manual installation, see [Shell Completions](#shell-completions) below.
-
-## Usage
+Included in release archives and Homebrew installs. For manual setup:
 
 ```bash
-# Show version and build information
-scrat info
-
-# JSON output for scripting
-scrat info --json
-
-# Enable verbose output
-scrat --verbose <command>
-```
-
-
-## Configuration
-
-Configuration files are discovered automatically in order of precedence (highest first):
-
-1. `.scrat.<ext>` in current directory or any parent
-2. `scrat.<ext>` in current directory or any parent
-3. `~/.config/scrat/config.<ext>` (user config)
-
-**Supported formats:** TOML, YAML, JSON (extensions: `.toml`, `.yaml`, `.yml`, `.json`)
-
-Values from higher-precedence files override lower ones. Missing files are silently ignored.
-
-See the example configurations in the repository root for templates.
-
-### Example Configuration
-
-**TOML** (`~/.config/scrat/config.toml`):
-```toml
-log_level = "info"
-```
-
-**YAML** (`~/.config/scrat/config.yaml`):
-```yaml
-log_level: info
-```
-
-**JSON** (`~/.config/scrat/config.json`):
-```json
-{
-  "log_level": "info"
-}
-```
-
-### Configuration Options
-
-| Option | Values | Default | Description |
-|--------|--------|---------|-------------|
-| `log_level` | `debug`, `info`, `warn`, `error` | `info` | Minimum log level to display |
-| `log_dir` | path | platform default | Directory for JSONL log files |
-
-
-## Logging
-
-Logs are written as **JSONL** to a daily-rotated file.
-Rotation is date-suffixed (e.g. `scrat.jsonl.2026-01-06`).
-
-> **Note**: Logs never write to stdout, which is reserved for application output
-> (important for tools like MCP servers that use stdout for communication).
-
-Default log path (first writable wins):
-
-1. `/var/log/scrat.jsonl` (Unix only, requires write access)
-2. OS user data directory (e.g. `~/.local/share/scrat/logs/scrat.jsonl`)
-3. Falls back to stderr if no writable directory is found
-
-Overrides:
-
-- `SCRAT_LOG_PATH` — full file path
-- `SCRAT_LOG_DIR` — directory (file name defaults to `scrat.jsonl`)
-- `SCRAT_ENV` — environment tag (default: `dev`)
-- Config file key: `log_dir`
-
-
-## Shell Completions
-
-Shell completions are included in the release archives. To install manually:
-
-**Bash**
-```bash
+# Bash
 scrat completions bash > ~/.local/share/bash-completion/completions/scrat
-```
 
-**Zsh**
-```bash
+# Zsh
 scrat completions zsh > ~/.zfunc/_scrat
-```
 
-**Fish**
-```bash
+# Fish
 scrat completions fish > ~/.config/fish/completions/scrat.fish
-```
-
-**PowerShell**
-```powershell
-scrat completions powershell > $PROFILE.CurrentUserAllHosts
-```
-
-## Development
-
-This project uses a workspace layout with multiple crates:
-
-```
-crates/
-├── scrat/       # CLI binary
-└── scrat-core/  # Core library (config, errors)
 ```
 
 ### Prerequisites
 
-- Rust 1.88.0+ (2024 edition)
-- [just](https://github.com/casey/just) (task runner)
-- [cargo-nextest](https://nexte.st/) (test runner)
+scrat shells out to these tools when their features are used:
 
-### Quick Start
+| Tool | Required For | Install |
+|------|-------------|---------|
+| [git-cliff](https://git-cliff.org/) | Changelog + release notes | `cargo install git-cliff` |
+| [gh](https://cli.github.com/) | GitHub release creation | `brew install gh` |
 
-```bash
-# List available tasks
-just --list
 
-# Run full check suite (format, lint, test)
-just check
+## Development
 
-# Run tests only
-just test
+Workspace layout:
 
-# Run with coverage
-just cov
 ```
+crates/
+  scrat/       # CLI binary — thin UI layer
+  scrat-core/  # Core library — all orchestration and logic
+xtask/         # Build automation (man pages, completions, install)
+```
+
+### Requirements
+
+- Rust 1.88.0+ (edition 2024)
+- [just](https://github.com/casey/just)
+- [cargo-nextest](https://nexte.st/)
 
 ### Build Tasks
 
 | Command | Description |
 |---------|-------------|
-| `just check` | Format, lint, and test |
-| `just fmt` | Format code with rustfmt |
-| `just clippy` | Run clippy lints |
+| `just check` | Format + clippy + deny + test + doc-test |
 | `just test` | Run tests with nextest |
-| `just doc-test` | Run documentation tests |
-| `just cov` | Generate coverage report |
+| `just clippy` | Run clippy lints |
+| `just fmt` | Format with rustfmt |
+| `just cov` | Coverage report |
+| `just deny` | Security/license audit |
 
+### Architecture
 
-### xtask Commands
+- **Thin CLI, fat core:**
+  the binary parses args, calls core, maybe prompts the user, displays results.
+  If you're importing `deps`, `stats`, `detect`, `git`, or `pipeline` in the CLI crate,
+  it belongs in core.
+- **Plan/execute pattern:**
+  `plan_ship()` returns `Ready` or `NeedsInteraction`.
+  The CLI only prompts on the latter.
+  `ReadyShip::execute()` runs the pipeline with event callbacks for progress display.
+- **Error handling:**
+  `thiserror` in the library, `anyhow` in the binary.
+- **Safe Rust only:**
+  `#![deny(unsafe_code)]` workspace-wide.
 
-The project includes an xtask crate for build automation:
+See [AGENTS.md](AGENTS.md) for full development conventions.
 
-```bash
-# Generate man pages
-cargo xtask man
-
-# Generate shell completions
-cargo xtask completions
-
-# Generate for specific shell
-cargo xtask completions --shell zsh
-```
-
-## Architecture
-
-
-### Crate Organization
-
-
-- **scrat** - The CLI binary. Handles argument parsing, command dispatch, and user interaction.
-- **scrat-core** - The core library. Contains configuration loading, error types, and shared functionality.
-
-### Error Handling
-
-- Libraries use `thiserror` for structured error types
-- Binaries use `anyhow` for flexible error propagation
-- All errors include context for debugging
-
-
-### Configuration System
-
-The `ConfigLoader` provides flexible configuration discovery:
-
-```rust
-use scrat_core::config::{Config, ConfigLoader};
-
-let config = ConfigLoader::new()
-    .with_project_search(std::env::current_dir()?)
-    .with_user_config(true)
-    .load()?;
-```
-
-Features:
-- Walks up directory tree looking for config files
-- Stops at repository boundaries (`.git` by default)
-- Merges multiple config sources with clear precedence
-- Supports explicit file paths for testing
-
-## CI/CD
-
-This project uses GitHub Actions for continuous integration:
-
-- **Build & Test** - Runs on every push and PR
-- **MSRV Check** - Verifies minimum supported Rust version
-- **Clippy** - Enforces lint rules
-- **Coverage** - Tracks test coverage
-
-### Dependabot
-
-This project uses Dependabot for security monitoring, but **not** for automatic pull requests. Instead:
-
-1. Dependabot scans for vulnerabilities in dependencies
-2. A weekly GitHub Actions workflow converts alerts into **issues**
-3. Maintainers review and address updates manually
-
-This approach provides:
-- Full control over when and how dependencies are updated
-- Opportunity to batch related updates together
-- Time to test updates before merging
-- Cleaner git history without automated PR noise
-
-Security alerts appear as issues labeled `dependabot-alert`.
-
-## Contributing
-
-Contributions welcome! Please see [AGENTS.md](AGENTS.md) for development conventions.
-
-### Commit Messages
-
-This project uses [Conventional Commits](https://www.conventionalcommits.org/):
-
-- `feat:` - New features
-- `fix:` - Bug fixes
-- `docs:` - Documentation changes
-- `perf:` - Performance improvements
-- `chore:` - Maintenance tasks
-
-### Code Style
-
-- Rust 2024 edition
-- `#![deny(unsafe_code)]` - Safe Rust only
-- Follow `rustfmt` defaults
-- Keep clippy clean
 
 ## License
 
@@ -302,4 +601,3 @@ Licensed under either of:
 - MIT license ([LICENSE-MIT](LICENSE-MIT))
 
 at your option.
-
