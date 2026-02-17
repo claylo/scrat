@@ -212,6 +212,9 @@ fn ship_help_shows_usage() {
         .stdout(predicate::str::contains("--no-push"))
         .stdout(predicate::str::contains("--no-release"))
         .stdout(predicate::str::contains("--no-test"))
+        .stdout(predicate::str::contains("--no-tag"))
+        .stdout(predicate::str::contains("--no-git"))
+        .stdout(predicate::str::contains("--draft"))
         .stdout(predicate::str::contains("--no-changelog"))
         .stdout(predicate::str::contains("--version"));
 }
