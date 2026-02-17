@@ -47,7 +47,7 @@ pub struct ShipArgs {
 
     /// Skip running tests
     #[arg(long)]
-    pub skip_tests: bool,
+    pub no_test: bool,
 
     /// Preview what would happen without making changes
     #[arg(long)]
@@ -84,7 +84,10 @@ pub fn cmd_ship(
         no_stats: args.no_stats,
         no_notes: args.no_notes,
         dry_run: args.dry_run,
-        skip_tests: args.skip_tests,
+        no_test: args.no_test,
+        no_tag: false,
+        no_git: false,
+        draft_override: None,
     };
 
     let is_dry = options.dry_run;
@@ -292,7 +295,7 @@ fn prompt_interactive_version(
 /// Print a summary of phases and hooks before the confirmation prompt.
 fn print_phase_summary(options: &ShipOptions, config: &Config) {
     let phases: &[(&str, bool)] = &[
-        ("test", !options.skip_tests),
+        ("test", !options.no_test),
         ("bump", true),
         ("publish", !options.no_publish),
         ("git", true),

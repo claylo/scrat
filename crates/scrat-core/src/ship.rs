@@ -99,7 +99,13 @@ pub struct ShipOptions {
     /// Preview what would happen without making changes.
     pub dry_run: bool,
     /// Skip running tests.
-    pub skip_tests: bool,
+    pub no_test: bool,
+    /// Skip git tag creation (still commits and pushes).
+    pub no_tag: bool,
+    /// Skip entire git phase (commit, tag, push).
+    pub no_git: bool,
+    /// Override draft mode from CLI (`Some(true)` = `--draft`, `Some(false)` = `--no-draft`).
+    pub draft_override: Option<bool>,
 }
 
 // ──────────────────────────────────────────────
@@ -419,9 +425,9 @@ impl ReadyShip {
         )?;
 
         on_event(ShipEvent::PhaseStarted(ShipPhase::Test));
-        let test_outcome = if self.options.skip_tests {
+        let test_outcome = if self.options.no_test {
             PhaseOutcome::Skipped {
-                reason: "--skip-tests flag".into(),
+                reason: "--no-test flag".into(),
             }
         } else if is_dry {
             let test_cmd = self
@@ -1075,9 +1081,12 @@ mod tests {
         assert!(!opts.no_deps);
         assert!(!opts.no_stats);
         assert!(!opts.no_notes);
-        assert!(!opts.skip_tests);
+        assert!(!opts.no_test);
+        assert!(!opts.no_tag);
+        assert!(!opts.no_git);
         assert!(!opts.no_changelog);
         assert!(opts.explicit_version.is_none());
+        assert!(opts.draft_override.is_none());
     }
 
     #[test]

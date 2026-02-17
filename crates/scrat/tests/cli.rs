@@ -211,7 +211,7 @@ fn ship_help_shows_usage() {
         .stdout(predicate::str::contains("--no-publish"))
         .stdout(predicate::str::contains("--no-push"))
         .stdout(predicate::str::contains("--no-release"))
-        .stdout(predicate::str::contains("--skip-tests"))
+        .stdout(predicate::str::contains("--no-test"))
         .stdout(predicate::str::contains("--no-changelog"))
         .stdout(predicate::str::contains("--version"));
 }
