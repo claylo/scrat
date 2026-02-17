@@ -47,7 +47,23 @@ pub struct ShipArgs {
 
     /// Skip running tests
     #[arg(long)]
-    pub skip_tests: bool,
+    pub no_test: bool,
+
+    /// Skip git tag creation (still commits and pushes)
+    #[arg(long)]
+    pub no_tag: bool,
+
+    /// Skip entire git phase (commit, tag, push)
+    #[arg(long)]
+    pub no_git: bool,
+
+    /// Create release as draft (overrides config)
+    #[arg(long, conflicts_with = "no_draft")]
+    pub draft: bool,
+
+    /// Create release as published, not draft (overrides config)
+    #[arg(long, conflicts_with = "draft")]
+    pub no_draft: bool,
 
     /// Preview what would happen without making changes
     #[arg(long)]
@@ -74,6 +90,14 @@ pub fn cmd_ship(
 
     let skip_confirm = args.yes;
 
+    let draft_override = if args.draft {
+        Some(true)
+    } else if args.no_draft {
+        Some(false)
+    } else {
+        None
+    };
+
     let options = ShipOptions {
         explicit_version: args.version,
         no_changelog: args.no_changelog,
@@ -84,7 +108,10 @@ pub fn cmd_ship(
         no_stats: args.no_stats,
         no_notes: args.no_notes,
         dry_run: args.dry_run,
-        skip_tests: args.skip_tests,
+        no_test: args.no_test,
+        no_tag: args.no_tag,
+        no_git: args.no_git,
+        draft_override,
     };
 
     let is_dry = options.dry_run;
@@ -292,10 +319,10 @@ fn prompt_interactive_version(
 /// Print a summary of phases and hooks before the confirmation prompt.
 fn print_phase_summary(options: &ShipOptions, config: &Config) {
     let phases: &[(&str, bool)] = &[
-        ("test", !options.skip_tests),
+        ("test", !options.no_test),
         ("bump", true),
         ("publish", !options.no_publish),
-        ("git", true),
+        ("git", !options.no_git),
         ("release", !options.no_release),
     ];
 

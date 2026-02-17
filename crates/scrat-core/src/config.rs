@@ -123,6 +123,22 @@ pub struct ReleaseConfig {
     /// If unset, uses the built-in template. The template is rendered by
     /// git-cliff (Tera syntax) with scrat's extra data injected into context.
     pub notes_template: Option<String>,
+    /// Create the GitHub release as a draft (default at usage site: `true`).
+    ///
+    /// When `true`, `gh release create --draft` is used. Review and publish
+    /// with `gh release edit <tag> --draft=false`.
+    pub draft: Option<bool>,
+    /// Title format for the GitHub release.
+    ///
+    /// Supports `{var}` interpolation: `{version}`, `{prev_version}`,
+    /// `{tag}`, `{owner}`, `{repo}`, `{changelog_path}`.
+    /// Default (when `None`): uses the tag as title (e.g., `v1.2.3`).
+    pub title: Option<String>,
+    /// GitHub Discussions category to associate with the release.
+    ///
+    /// When set, passes `--discussion-category <value>` to `gh release create`.
+    /// Only applies to newly created releases (not edits).
+    pub discussion_category: Option<String>,
 }
 
 /// Hook commands to run at each phase of the release workflow.
@@ -753,6 +769,34 @@ assets = ["release-card.png", "checksums.txt"]
                 "checksums.txt".to_string()
             ])
         );
+    }
+
+    #[test]
+    fn test_config_with_release_draft_and_title() {
+        let tmp = TempDir::new().unwrap();
+        let config_path = tmp.path().join("config.toml");
+        fs::write(
+            &config_path,
+            r#"
+[release]
+draft = true
+title = "{repo} {tag}"
+discussion_category = "releases"
+"#,
+        )
+        .unwrap();
+
+        let config_path = Utf8PathBuf::try_from(config_path).unwrap();
+        let config = ConfigLoader::new()
+            .with_user_config(false)
+            .with_file(&config_path)
+            .load()
+            .unwrap();
+
+        let release = config.release.unwrap();
+        assert_eq!(release.draft, Some(true));
+        assert_eq!(release.title.as_deref(), Some("{repo} {tag}"));
+        assert_eq!(release.discussion_category.as_deref(), Some("releases"));
     }
 
     #[test]
