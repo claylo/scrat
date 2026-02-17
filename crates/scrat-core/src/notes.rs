@@ -374,17 +374,17 @@ fn run_cliff_render(
 ) -> Result<String, NotesError> {
     use std::io::Write;
 
-    // Write template to a temp file (git-cliff --body reads a file path)
-    let mut template_file = tempfile::NamedTempFile::new()
-        .map_err(|e| NotesError::CliffRender(format!("failed to create temp file: {e}")))?;
-    template_file
-        .write_all(template_body.as_bytes())
-        .map_err(|e| NotesError::CliffRender(format!("failed to write template: {e}")))?;
-
-    let template_path = template_file.path().to_string_lossy().to_string();
-
+    // --body takes inline template text, not a file path
+    // --strip header suppresses the project's cliff.toml changelog header
     let mut child = Command::new("git-cliff")
-        .args(["--from-context", "-", "--body", &template_path])
+        .args([
+            "--from-context",
+            "-",
+            "--body",
+            template_body,
+            "--strip",
+            "header",
+        ])
         .stdin(std::process::Stdio::piped())
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped())
