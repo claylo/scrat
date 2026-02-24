@@ -102,14 +102,10 @@ pub fn plan_init(project_root: &Utf8Path) -> InitPlan {
 
 // ─── Template constants ────────────────────────────────────────────────────
 
-const TEMPLATE_DOCUMENTED_TOML: &str =
-    include_str!("../templates/init-documented.toml");
-const TEMPLATE_DOCUMENTED_YAML: &str =
-    include_str!("../templates/init-documented.yaml");
-const TEMPLATE_MINIMAL_TOML: &str =
-    include_str!("../templates/init-minimal.toml");
-const TEMPLATE_MINIMAL_YAML: &str =
-    include_str!("../templates/init-minimal.yaml");
+const TEMPLATE_DOCUMENTED_TOML: &str = include_str!("../templates/init-documented.toml");
+const TEMPLATE_DOCUMENTED_YAML: &str = include_str!("../templates/init-documented.yaml");
+const TEMPLATE_MINIMAL_TOML: &str = include_str!("../templates/init-minimal.toml");
+const TEMPLATE_MINIMAL_YAML: &str = include_str!("../templates/init-minimal.yaml");
 
 /// Generate a config file from user selections.
 ///
@@ -365,7 +361,10 @@ mod tests {
         let output = generate_config(&default_selections());
         assert!(output.contains("# scrat configuration"), "missing header");
         assert!(output.contains("type = \"rust\""), "missing ecosystem");
-        assert!(output.contains("github_release = true"), "missing gh release");
+        assert!(
+            output.contains("github_release = true"),
+            "missing gh release"
+        );
         assert!(output.contains("draft = true"), "missing draft");
         assert!(output.contains("# [hooks]"), "missing hooks section");
     }
@@ -377,7 +376,10 @@ mod tests {
         let output = generate_config(&sel);
         assert!(output.contains("# scrat configuration"), "missing header");
         assert!(output.contains("type: rust"), "missing ecosystem");
-        assert!(output.contains("github_release: true"), "missing gh release");
+        assert!(
+            output.contains("github_release: true"),
+            "missing gh release"
+        );
         assert!(output.contains("# hooks:"), "missing hooks section");
     }
 
@@ -387,7 +389,10 @@ mod tests {
         sel.style = ConfigStyle::Minimal;
         let output = generate_config(&sel);
         assert!(output.contains("type = \"rust\""), "missing ecosystem");
-        assert!(output.contains("github_release = true"), "missing gh release");
+        assert!(
+            output.contains("github_release = true"),
+            "missing gh release"
+        );
         assert!(!output.contains("# ───"), "should not have dividers");
     }
 
@@ -398,7 +403,10 @@ mod tests {
         sel.style = ConfigStyle::Minimal;
         let output = generate_config(&sel);
         assert!(output.contains("type: rust"), "missing ecosystem");
-        assert!(output.contains("github_release: true"), "missing gh release");
+        assert!(
+            output.contains("github_release: true"),
+            "missing gh release"
+        );
         assert!(!output.contains("# ───"), "should not have dividers");
     }
 
