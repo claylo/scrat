@@ -209,12 +209,12 @@ update:
 
 # Upgrade Cargo.toml to latest compatible versions
 upgrade:
-    cargo upgrade --workspace
+    cargo upgrade
     cargo update --workspace
 
 # The nuclear option: upgrade to latest incompatible versions (breaking changes)
 upgrade-breaking:
-    cargo upgrade --workspace --incompatible
+    cargo upgrade --incompatible
     cargo update --workspace
 
 # See what WOULD update without doing it

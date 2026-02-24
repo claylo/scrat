@@ -57,6 +57,18 @@ fn short_version_flag_shows_version() {
         .stdout(predicate::str::contains(env!("CARGO_PKG_VERSION")));
 }
 
+#[test]
+fn version_only_prints_bare_version() {
+    cmd()
+        .arg("--version-only")
+        .assert()
+        .success()
+        .stdout(predicate::str::diff(format!(
+            "{}\n",
+            env!("CARGO_PKG_VERSION")
+        )));
+}
+
 // =============================================================================
 // Info Command
 // =============================================================================
@@ -153,9 +165,10 @@ fn color_never_accepted() {
 
 #[test]
 fn no_subcommand_shows_help() {
+    // arg_required_else_help makes clap print help to stderr and exit 2
     cmd()
         .assert()
-        .failure()
+        .code(2)
         .stderr(predicate::str::contains("Usage:"));
 }
 
