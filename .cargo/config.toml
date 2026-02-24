@@ -18,16 +18,3 @@ git-fetch-with-cli = true   # use `git` executable for git ops
 
 [registries.crates-io]
 protocol = "sparse"
-
-# Use lld on Linux (much faster than default ld)
-[target.x86_64-unknown-linux-gnu]
-linker = "clang"
-rustflags = ["-C", "link-arg=-fuse-ld=lld"]
-
-[target.aarch64-unknown-linux-gnu]
-linker = "clang"
-rustflags = ["-C", "link-arg=-fuse-ld=lld"]
-
-# macOS: The default linker works. If you have lld installed, it will be used
-# automatically if configured in your environment. The new Apple linker (-ld_new)
-# requires Xcode 15+ and conflicts with lld, so we don't set it here.

@@ -23,7 +23,7 @@ jobs:
       version: ${{ steps.version.outputs.version }}
     steps:
       - name: Checkout
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.1
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           fetch-depth: 0
 
@@ -32,7 +32,7 @@ jobs:
         run: echo "version=${GITHUB_REF#refs/tags/v}" >> $GITHUB_OUTPUT
 
       - name: Generate changelog
-        uses: orhun/git-cliff-action@e16f179f0be49ecdfe63753837f20b9531642772 # v4.7.0
+        uses: orhun/git-cliff-action@c93ef52f3d0ddcdcc9bd5447d98d458a11cd4f72 # v4.7.1
         id: git-cliff
         with:
           config: cliff.toml
@@ -56,21 +56,28 @@ jobs:
           - { NAME: windows-arm64-msvc, os: windows-2025, target: aarch64-pc-windows-msvc }
     steps:
       - name: Checkout
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.1
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
 
       - name: Install musl tools
-        if: contains(matrix.build.target, 'musl')
+        if: contains(matrix.build.target, 'musl') && contains(matrix.build.target, 'x86_64')
         run: sudo apt-get update && sudo apt-get install -y musl-tools
 
-      - name: Install cross-compilation tools
-        if: matrix.build.target == 'aarch64-unknown-linux-gnu'
-        run: sudo apt-get update && sudo apt-get install -y gcc-aarch64-linux-gnu
+      - name: Install arm64 cross-compilation tools
+        if: contains(matrix.build.target, 'aarch64-unknown-linux')
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc-aarch64-linux-gnu
+          if [[ "${{ matrix.build.target }}" == *"musl"* ]]; then
+            sudo apt-get install -y musl-tools
+          fi
 
       - name: Rust toolchain
         uses: dtolnay/rust-toolchain@e97e2d8cc328f1b50210efc529dca0028893a2d9 # v1
         with:
           toolchain: stable
-          targets: ${{ matrix.build.target }}
+
+      - name: Add compilation target
+        run: rustup target add ${{ matrix.build.target }}
 
       - name: Rust cache
         uses: ./.github/actions/setup-rust-cache
@@ -86,8 +93,11 @@ jobs:
       - name: Build
         shell: bash
         run: |
-          if [[ "${{ matrix.build.os }}" == "ubuntu-22.04" && "${{ matrix.build.target }}" == "aarch64-unknown-linux-gnu" ]]; then
+          if [[ "${{ matrix.build.target }}" == "aarch64-unknown-linux-gnu" ]]; then
             export CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER=aarch64-linux-gnu-gcc
+          elif [[ "${{ matrix.build.target }}" == "aarch64-unknown-linux-musl" ]]; then
+            export CARGO_TARGET_AARCH64_UNKNOWN_LINUX_MUSL_LINKER=aarch64-linux-gnu-gcc
+            export CC_aarch64_unknown_linux_musl=aarch64-linux-gnu-gcc
           fi
           cargo auditable build --release --locked --target ${{ matrix.build.target }}
 
@@ -123,7 +133,7 @@ jobs:
           TARGET: ${{ matrix.build.target }}
         run: |
           mkdir -p release/bin release/share
-          cp LICENSE-* README.md CHANGELOG.md release/ 2>/dev/null || true
+          cp LICENSE-* THIRD-PARTY-NOTICES README.md CHANGELOG.md release/ 2>/dev/null || true
 
           # Binary
           bin="$PROJECT_NAME"
@@ -158,6 +168,7 @@ jobs:
           echo "${{ secrets.GPG_RELEASE_KEY }}" | base64 --decode > private.key
           echo "${{ secrets.GPG_PASSPHRASE }}" | gpg --pinentry-mode=loopback --passphrase-fd 0 --import private.key
           echo "${{ secrets.GPG_PASSPHRASE }}" | gpg --pinentry-mode=loopback --passphrase-fd 0 --detach-sign "${PROJECT_NAME}-${VERSION}-${TARGET}.tar.gz"
+          rm -f private.key
 
       - name: Upload release
         if: ${{ !contains(github.ref, '-') }}
@@ -197,7 +208,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.1
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
 
       - name: Rust toolchain
         uses: dtolnay/rust-toolchain@e97e2d8cc328f1b50210efc529dca0028893a2d9 # v1
@@ -210,15 +221,102 @@ jobs:
   publish-homebrew:
     name: Publish Homebrew formula
     if: ${{ !contains(github.ref, '-') && vars.HOMEBREW_ENABLED == 'true' }}
-    needs: publish-binaries
+    needs: [generate-changelog, publish-binaries]
     runs-on: ubuntu-latest
+    env:
+      VERSION: ${{ needs.generate-changelog.outputs.version }}
     steps:
-      - name: Bump formula
-        uses: mislav/bump-homebrew-formula-action@56a283fa15557e9abaa4bdb63b8212abc68e655c # v3.6
-        with:
-          formula-name: ${{ env.PROJECT_NAME }}
+      - name: Download SHA256 checksums
         env:
-          COMMITTER_TOKEN: ${{ secrets.HOMEBREW_COMMITTER_TOKEN }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          mkdir -p checksums
+          gh release download "v${VERSION}" \
+            --pattern "*.sha256" \
+            --dir checksums \
+            --repo "${{ github.repository }}"
+
+      - name: Generate formula
+        run: |
+          get_sha() {
+            local target="$1"
+            awk '{print $1}' "checksums/${PROJECT_NAME}-${VERSION}-${target}.tar.gz.sha256"
+          }
+
+          SHA_DARWIN_ARM64=$(get_sha "aarch64-apple-darwin")
+          SHA_DARWIN_X64=$(get_sha "x86_64-apple-darwin")
+          SHA_LINUX_ARM64=$(get_sha "aarch64-unknown-linux-gnu")
+          SHA_LINUX_X64=$(get_sha "x86_64-unknown-linux-gnu")
+
+          cat > formula.rb <<RUBY
+          # typed: true
+          # frozen_string_literal: true
+
+          class Scrat < Formula
+            desc "Release management tooling focused on sanity retention"
+            homepage "https://github.com/${{ github.repository }}"
+            version "${VERSION}"
+            license "Apache-2.0 OR MIT"
+
+            on_macos do
+              if Hardware::CPU.arm?
+                url "https://github.com/${{ github.repository }}/releases/download/v#{version}/${PROJECT_NAME}-#{version}-aarch64-apple-darwin.tar.gz"
+                sha256 "${SHA_DARWIN_ARM64}"
+              else
+                url "https://github.com/${{ github.repository }}/releases/download/v#{version}/${PROJECT_NAME}-#{version}-x86_64-apple-darwin.tar.gz"
+                sha256 "${SHA_DARWIN_X64}"
+              end
+            end
+
+            on_linux do
+              if Hardware::CPU.arm?
+                url "https://github.com/${{ github.repository }}/releases/download/v#{version}/${PROJECT_NAME}-#{version}-aarch64-unknown-linux-gnu.tar.gz"
+                sha256 "${SHA_LINUX_ARM64}"
+              else
+                url "https://github.com/${{ github.repository }}/releases/download/v#{version}/${PROJECT_NAME}-#{version}-x86_64-unknown-linux-gnu.tar.gz"
+                sha256 "${SHA_LINUX_X64}"
+              end
+            end
+
+            def install
+              bin.install "bin/${PROJECT_NAME}"
+              man1.install Dir["share/man/man1/*.1"]
+              bash_completion.install "share/completions/${PROJECT_NAME}.bash" => "${PROJECT_NAME}"
+              zsh_completion.install "share/completions/_${PROJECT_NAME}"
+              fish_completion.install "share/completions/${PROJECT_NAME}.fish"
+            end
+
+            test do
+              assert_match version.to_s, shell_output("\#{bin}/${PROJECT_NAME} --version-only")
+            end
+          end
+          RUBY
+
+          echo "Generated formula:"
+          cat formula.rb
+
+      - name: Push to tap
+        env:
+          GH_TOKEN: ${{ secrets.HOMEBREW_COMMITTER_TOKEN }}
+        run: |
+          TAP_REPO="${{ vars.HOMEBREW_TAP }}"
+          gh api "repos/${TAP_REPO}/contents/Formula/${PROJECT_NAME}.rb" \
+            --jq '.sha' > /tmp/old_sha 2>/dev/null || true
+
+          CONTENT=$(base64 -w0 formula.rb)
+          OLD_SHA=$(cat /tmp/old_sha 2>/dev/null || echo "")
+
+          JSON=$(jq -n \
+            --arg message "${PROJECT_NAME} ${VERSION}" \
+            --arg content "$CONTENT" \
+            --arg sha "$OLD_SHA" \
+            'if $sha != "" then {message: $message, content: $content, sha: $sha} else {message: $message, content: $content} end')
+
+          gh api "repos/${TAP_REPO}/contents/Formula/${PROJECT_NAME}.rb" \
+            --method PUT \
+            --input - <<< "$JSON"
+
+          echo "Updated Formula/${PROJECT_NAME}.rb in ${TAP_REPO}"
 
   publish-deb:
     name: Publish Debian package
@@ -227,7 +325,7 @@ jobs:
     runs-on: ubuntu-22.04
     steps:
       - name: Checkout
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.1
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
 
       - name: Rust toolchain
         uses: dtolnay/rust-toolchain@e97e2d8cc328f1b50210efc529dca0028893a2d9 # v1
@@ -287,7 +385,7 @@ jobs:
     runs-on: ubuntu-22.04
     steps:
       - name: Checkout
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.1
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
 
       - name: Rust toolchain
         uses: dtolnay/rust-toolchain@e97e2d8cc328f1b50210efc529dca0028893a2d9 # v1
@@ -345,17 +443,23 @@ jobs:
     if: ${{ !contains(github.ref, '-') && vars.NPM_ENABLED == 'true' }}
     needs: [generate-changelog, publish-binaries]
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write # OIDC for npm trusted publishing
     env:
       VERSION: ${{ needs.generate-changelog.outputs.version }}
     steps:
       - name: Checkout
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.1
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
 
       - name: Setup Node
         uses: actions/setup-node@6044e13b5dc448c55e2357c09f80417699197238 # v6.2.0
         with:
           node-version: 20
           registry-url: "https://registry.npmjs.org"
+
+      - name: Install npm with OIDC support
+        run: npm install -g npm@latest
 
       - name: Download release artifacts
         env:
@@ -399,7 +503,7 @@ jobs:
             zipfile="artifacts/${PROJECT_NAME}-${VERSION}-${target}.zip"
 
             if [[ -f "$tarball" ]]; then
-              tar -xzf "$tarball" -C "${pkg_dir}/bin" --strip-components=2 "*/bin/${PROJECT_NAME}"
+              tar -xzf "$tarball" -C "${pkg_dir}/bin" --strip-components=1 "bin/${PROJECT_NAME}"
               chmod +x "${pkg_dir}/bin/${PROJECT_NAME}"
             elif [[ -f "$zipfile" ]]; then
               unzip -j "$zipfile" "bin/${PROJECT_NAME}.exe" -d "${pkg_dir}/bin"
@@ -429,10 +533,33 @@ jobs:
           ' "${main_pkg}/package.json" > tmp.json
           mv tmp.json "${main_pkg}/package.json"
 
-      - name: Publish platform packages
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+      - name: Add READMEs to npm packages
         run: |
+          # Main package gets the repo README
+          cp README.md "npm/${PROJECT_NAME}/README.md"
+
+          # Platform packages get a pointer to the main package
+          for pkg_dir in npm/platforms/*/; do
+            [[ -d "$pkg_dir" ]] || continue
+            platform=$(basename "$pkg_dir" | sed "s/${PROJECT_NAME}-//")
+            cat > "${pkg_dir}README.md" <<EOF
+          # @claylo/${PROJECT_NAME}-${platform}
+
+          This is the **${platform}** binary for [\`@claylo/${PROJECT_NAME}\`](https://www.npmjs.com/package/@claylo/${PROJECT_NAME}).
+
+          Install the main package instead:
+
+          \`\`\`sh
+          npm install @claylo/${PROJECT_NAME}
+          \`\`\`
+
+          The correct platform binary will be selected automatically.
+          EOF
+          done
+
+      - name: Publish platform packages
+        run: |
+          failures=0
           for pkg_dir in npm/platforms/*/; do
             [[ -d "$pkg_dir" ]] || continue
 
@@ -444,14 +571,19 @@ jobs:
 
             echo "Publishing $(basename "$pkg_dir")..."
             cd "$pkg_dir"
-            npm publish --access public || echo "Failed to publish $(basename "$pkg_dir")"
+            if ! npm publish --provenance --access public; then
+              echo "::error::Failed to publish $(basename "$pkg_dir")"
+              failures=$((failures + 1))
+            fi
             cd - > /dev/null
           done
+          if [[ $failures -gt 0 ]]; then
+            echo "::error::${failures} platform package(s) failed to publish"
+            exit 1
+          fi
 
       - name: Publish main package
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: |
           cd "npm/${PROJECT_NAME}"
-          npm publish --access public
+          npm publish --provenance --access public
 
