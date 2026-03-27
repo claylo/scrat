@@ -3,7 +3,7 @@
 [![CI](https://github.com/claylo/scrat/actions/workflows/ci.yml/badge.svg)](https://github.com/claylo/scrat/actions/workflows/ci.yml)
 [![Crates.io](https://img.shields.io/crates/v/scrat.svg)](https://crates.io/crates/scrat)
 [![docs.rs](https://docs.rs/scrat/badge.svg)](https://docs.rs/scrat)
-[![MSRV](https://img.shields.io/badge/MSRV-1.88.0-blue.svg)](https://github.com/claylo/scrat)
+[![MSRV](https://img.shields.io/badge/MSRV-1.89.0-blue.svg)](https://github.com/claylo/scrat)
 
 **Release management tooling focused on sanity retention.**
 
@@ -116,21 +116,23 @@ Three strategies, auto-detected:
 | **Interactive** | Fallback | Shows recent commits, offers version candidates, you pick |
 
 scrat reads the current version from your project files
-(`Cargo.toml`, `package.json`, etc.)
+(`Cargo.toml`, `package.json`)
 and computes candidates from there.
+Go and PHP projects don't have a standard version file, so they use the
+interactive or explicit strategy.
 
 ### 3. Test
 
 Runs your test suite.
 The command is auto-detected per ecosystem:
 
-| Ecosystem | Default Command |
-|-----------|----------------|
-| Rust | `cargo test` |
-| Node | `npm test` |
-| PHP (Composer) | `composer test` |
-| Python | `pytest` |
-| Go | `go test ./...` |
+| Ecosystem | Detected Via | Default Command |
+|-----------|-------------|----------------|
+| Rust | `Cargo.toml` | `cargo test` |
+| Node | `package.json` | `npm test` |
+| Go | `go.mod` | `go test ./...` |
+| PHP | `composer.json` | `composer test` |
+| Generic | (manual selection) | (none — set `commands.test`) |
 
 Override with `commands.test` in config.
 Skip with `--no-test`.
@@ -139,7 +141,9 @@ Skip with `--no-test`.
 
 Updates version numbers in project files and generates the changelog.
 
-- Writes the new version to `Cargo.toml`, `package.json`, etc.
+- Writes the new version to `Cargo.toml` (Rust), `package.json` (Node),
+  or `composer.json` (PHP, only if a `"version"` field already exists)
+- Go skips version-file rewrite (version lives in the git tag)
 - Runs `git-cliff` to update `CHANGELOG.md`
 - Reports which files were modified
 
@@ -155,6 +159,8 @@ Auto-detected:
 |-----------|----------------|
 | Rust | `cargo publish` |
 | Node | `npm publish` |
+| Go | (none — Go modules publish via `git push`) |
+| PHP | (none — set `commands.publish` if needed) |
 
 Skip with `--no-publish`.
 Override with `commands.publish` in config.
@@ -162,17 +168,17 @@ Override with `commands.publish` in config.
 ### 6. Dependency Diff
 
 Diffs lockfiles between the previous tag and HEAD to find what changed.
-Supports:
 
-- `Cargo.lock`
-- `package-lock.json`
-- `composer.lock`
-- `Gemfile.lock`
-- `go.sum`
-- `requirements.txt` / `poetry.lock`
+| Ecosystem | Lockfile | Parser |
+|-----------|----------|--------|
+| Rust | `Cargo.lock` | State machine over `[[package]]` blocks |
+| Go | `go.mod` | Line-oriented collect-and-merge (not `go.sum` — cleaner, no checksums) |
+| PHP | `composer.lock` | State machine over JSON `"name"`/`"version"` pairs |
+| Node | `package-lock.json` | (stub — returns empty, full parser planned) |
+| Generic | (none) | Skipped |
 
-The diff parses `git diff` output—not the full lockfile format—so it's fast
-and doesn't need ecosystem-specific parsers.
+All parsers work on `git diff` output—not the full lockfile—so they're fast
+and don't need heavyweight format-specific dependencies.
 Results feed into release notes automatically.
 
 Skip with `--no-deps`.
@@ -332,7 +338,7 @@ log_level = "info"
 # log_dir = "/var/log/scrat"
 
 [project]
-# Override detected ecosystem: rust, node, php, python, go
+# Override detected ecosystem: rust, node, go, php, generic
 # type = "rust"
 # Override release branch (default: auto-detect main/master)
 # release_branch = "main"
@@ -565,7 +571,7 @@ xtask/         # Build automation (man pages, completions, install)
 
 ### Requirements
 
-- Rust 1.88.0+ (edition 2024)
+- Rust toolchain per `rust-toolchain.toml` (currently 1.94.1)
 - [just](https://github.com/casey/just)
 - [cargo-nextest](https://nexte.st/)
 
@@ -595,7 +601,6 @@ xtask/         # Build automation (man pages, completions, install)
 - **Safe Rust only:**
   `#![deny(unsafe_code)]` workspace-wide.
 
-See [AGENTS.md](AGENTS.md) for full development conventions.
 
 
 ## License

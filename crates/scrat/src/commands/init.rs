@@ -258,6 +258,8 @@ fn prompt_ecosystem(plan: &init::InitPlan) -> anyhow::Result<Option<Ecosystem>> 
         "Generic (no ecosystem-specific behavior)".to_string(),
         "Rust".to_string(),
         "Node".to_string(),
+        "Go".to_string(),
+        "PHP".to_string(),
         "Skip (omit from config)".to_string(),
     ];
 
@@ -270,6 +272,8 @@ fn prompt_ecosystem(plan: &init::InitPlan) -> anyhow::Result<Option<Ecosystem>> 
         s if s.starts_with("Generic") => Ok(Some(Ecosystem::Generic)),
         "Rust" => Ok(Some(Ecosystem::Rust)),
         "Node" => Ok(Some(Ecosystem::Node)),
+        "Go" => Ok(Some(Ecosystem::Go)),
+        "PHP" => Ok(Some(Ecosystem::Php)),
         s if s.starts_with("Skip") => Ok(None),
         _ => bail!("unexpected selection: {selection}"),
     }

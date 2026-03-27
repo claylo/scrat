@@ -15,6 +15,10 @@ pub enum Ecosystem {
     Rust,
     /// Node.js project (detected via `package.json`).
     Node,
+    /// Go project (detected via `go.mod`).
+    Go,
+    /// PHP project (detected via `composer.json`).
+    Php,
     /// Generic project — no ecosystem-specific behavior.
     ///
     /// Selected interactively when auto-detection finds no marker files,
@@ -29,6 +33,8 @@ impl fmt::Display for Ecosystem {
         match self {
             Self::Rust => write!(f, "rust"),
             Self::Node => write!(f, "node"),
+            Self::Go => write!(f, "go"),
+            Self::Php => write!(f, "php"),
             Self::Generic => write!(f, "generic"),
         }
     }
@@ -42,6 +48,8 @@ impl Ecosystem {
         match self {
             Self::Rust => Some("Cargo.toml"),
             Self::Node => Some("package.json"),
+            Self::Go => Some("go.mod"),
+            Self::Php => Some("composer.json"),
             Self::Generic => None,
         }
     }
@@ -53,6 +61,8 @@ impl Ecosystem {
         match self {
             Self::Rust => Some("Cargo.lock"),
             Self::Node => Some("package-lock.json"),
+            Self::Go => Some("go.mod"),
+            Self::Php => Some("composer.lock"),
             Self::Generic => None,
         }
     }
@@ -61,10 +71,10 @@ impl Ecosystem {
     ///
     /// [`Generic`](Self::Generic) is excluded — it is only selected
     /// interactively or via config override.
-    pub const AUTO_DETECTABLE: &[Self] = &[Self::Rust, Self::Node];
+    pub const AUTO_DETECTABLE: &[Self] = &[Self::Rust, Self::Node, Self::Go, Self::Php];
 
     /// All ecosystem variants, including [`Generic`](Self::Generic).
-    pub const ALL: &[Self] = &[Self::Rust, Self::Node, Self::Generic];
+    pub const ALL: &[Self] = &[Self::Rust, Self::Node, Self::Go, Self::Php, Self::Generic];
 }
 
 /// Version-determination strategy.

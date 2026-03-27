@@ -29,7 +29,7 @@ pub fn prompt_ecosystem_selection() -> anyhow::Result<Ecosystem> {
     );
     println!(
         "{}",
-        "No Cargo.toml, package.json, or other marker file found.".dimmed()
+        "No Cargo.toml, package.json, go.mod, or composer.json found.".dimmed()
     );
     println!();
 
@@ -37,6 +37,8 @@ pub fn prompt_ecosystem_selection() -> anyhow::Result<Ecosystem> {
         "Generic (no ecosystem-specific behavior)".to_string(),
         "Rust".to_string(),
         "Node".to_string(),
+        "Go".to_string(),
+        "PHP".to_string(),
         "Exit".to_string(),
     ];
 
@@ -49,6 +51,8 @@ pub fn prompt_ecosystem_selection() -> anyhow::Result<Ecosystem> {
         s if s.starts_with("Generic") => Ok(Ecosystem::Generic),
         "Rust" => Ok(Ecosystem::Rust),
         "Node" => Ok(Ecosystem::Node),
+        "Go" => Ok(Ecosystem::Go),
+        "PHP" => Ok(Ecosystem::Php),
         "Exit" => {
             println!("{}", "Cancelled.".yellow());
             std::process::exit(0);

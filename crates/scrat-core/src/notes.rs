@@ -215,6 +215,12 @@ fn detect_current_version(project_root: &Utf8Path, ecosystem: &str) -> Option<St
             let parsed: serde_json::Value = serde_json::from_str(&content).ok()?;
             parsed["version"].as_str().map(String::from)
         }
+        "php" => {
+            let composer_json = project_root.join("composer.json");
+            let content = std::fs::read_to_string(&composer_json).ok()?;
+            let parsed: serde_json::Value = serde_json::from_str(&content).ok()?;
+            parsed["version"].as_str().map(String::from)
+        }
         _ => None,
     }
 }

@@ -323,6 +323,28 @@ mod tests {
                     changelog_tool: None,
                 },
             },
+            Ecosystem::Go => ProjectDetection {
+                ecosystem: Ecosystem::Go,
+                version_strategy: VersionStrategy::Interactive,
+                tools: DetectedTools {
+                    test_cmd: "go test ./...".into(),
+                    build_cmd: "go build ./...".into(),
+                    publish_cmd: None,
+                    bump_cmd: None,
+                    changelog_tool: None,
+                },
+            },
+            Ecosystem::Php => ProjectDetection {
+                ecosystem: Ecosystem::Php,
+                version_strategy: VersionStrategy::Interactive,
+                tools: DetectedTools {
+                    test_cmd: "composer test".into(),
+                    build_cmd: String::new(),
+                    publish_cmd: None,
+                    bump_cmd: None,
+                    changelog_tool: None,
+                },
+            },
             Ecosystem::Generic => ProjectDetection::generic(VersionStrategy::Interactive),
         }
     }
