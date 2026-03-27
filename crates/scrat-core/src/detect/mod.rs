@@ -46,6 +46,8 @@ pub fn resolve_detection(
         let detection = match ecosystem {
             Ecosystem::Rust => rust::detect_rust(project_root, version_strategy),
             Ecosystem::Node => detect_node_stub(version_strategy),
+            Ecosystem::Go => detect_go_stub(version_strategy),
+            Ecosystem::Php => detect_php_stub(version_strategy),
             Ecosystem::Generic => ProjectDetection::generic(version_strategy),
         };
         return Some(detection);
@@ -70,6 +72,8 @@ pub fn detect_project(project_root: &Utf8Path) -> Option<ProjectDetection> {
     let detection = match ecosystem {
         Ecosystem::Rust => rust::detect_rust(project_root, version_strategy),
         Ecosystem::Node => detect_node_stub(version_strategy),
+        Ecosystem::Go => detect_go_stub(version_strategy),
+        Ecosystem::Php => detect_php_stub(version_strategy),
         Ecosystem::Generic => ProjectDetection::generic(version_strategy),
     };
 
@@ -132,6 +136,40 @@ fn detect_node_stub(version_strategy: VersionStrategy) -> ProjectDetection {
     }
 }
 
+/// Stub detection for Go ecosystem.
+fn detect_go_stub(version_strategy: VersionStrategy) -> ProjectDetection {
+    use crate::ecosystem::DetectedTools;
+
+    ProjectDetection {
+        ecosystem: Ecosystem::Go,
+        version_strategy,
+        tools: DetectedTools {
+            test_cmd: "go test ./...".into(),
+            build_cmd: "go build ./...".into(),
+            publish_cmd: None,
+            bump_cmd: None,
+            changelog_tool: None,
+        },
+    }
+}
+
+/// Stub detection for PHP/Composer ecosystem.
+fn detect_php_stub(version_strategy: VersionStrategy) -> ProjectDetection {
+    use crate::ecosystem::DetectedTools;
+
+    ProjectDetection {
+        ecosystem: Ecosystem::Php,
+        version_strategy,
+        tools: DetectedTools {
+            test_cmd: "composer test".into(),
+            build_cmd: String::new(),
+            publish_cmd: None,
+            bump_cmd: None,
+            changelog_tool: None,
+        },
+    }
+}
+
 /// Build a [`ProjectDetection`] for a user-selected ecosystem.
 ///
 /// Called after the CLI prompts the user to choose an ecosystem when
@@ -141,6 +179,8 @@ pub fn build_detection(project_root: &Utf8Path, ecosystem: Ecosystem) -> Project
     match ecosystem {
         Ecosystem::Rust => rust::detect_rust(project_root, version_strategy),
         Ecosystem::Node => detect_node_stub(version_strategy),
+        Ecosystem::Go => detect_go_stub(version_strategy),
+        Ecosystem::Php => detect_php_stub(version_strategy),
         Ecosystem::Generic => ProjectDetection::generic(version_strategy),
     }
 }

@@ -187,6 +187,13 @@ fn build_commands_section(selections: &InitSelections) -> String {
                     lines.push("# build = \"npm run build\"".to_string());
                     lines.push("# publish = \"npm publish\"".to_string());
                 }
+                Ecosystem::Go => {
+                    lines.push("# test = \"go test ./...\"".to_string());
+                    lines.push("# build = \"go build ./...\"".to_string());
+                }
+                Ecosystem::Php => {
+                    lines.push("# test = \"composer test\"".to_string());
+                }
                 Ecosystem::Generic => {
                     lines.push("# test = \"make test\"".to_string());
                     lines.push("# build = \"make build\"".to_string());
@@ -206,6 +213,13 @@ fn build_commands_section(selections: &InitSelections) -> String {
                     lines.push("#   test: npm test".to_string());
                     lines.push("#   build: npm run build".to_string());
                     lines.push("#   publish: npm publish".to_string());
+                }
+                Ecosystem::Go => {
+                    lines.push("#   test: go test ./...".to_string());
+                    lines.push("#   build: go build ./...".to_string());
+                }
+                Ecosystem::Php => {
+                    lines.push("#   test: composer test".to_string());
                 }
                 Ecosystem::Generic => {
                     lines.push("#   test: make test".to_string());

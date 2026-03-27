@@ -244,6 +244,16 @@ impl ReadyBump {
             Ecosystem::Node => {
                 return Err(BumpError::UnsupportedEcosystem(Ecosystem::Node));
             }
+            Ecosystem::Go => {
+                debug!("go ecosystem — version lives in git tags, no file to bump");
+            }
+            Ecosystem::Php => {
+                if bump_composer_version(project_root, &self.next)? {
+                    modified_files.push("composer.json".into());
+                } else {
+                    debug!("composer.json has no version field, skipping");
+                }
+            }
             Ecosystem::Generic => {
                 debug!("generic ecosystem — no project files to bump");
             }
@@ -317,6 +327,44 @@ fn bump_rust_version(
     }
 
     Ok(())
+}
+
+/// Bump the version in `composer.json` if it has a `"version"` field.
+///
+/// Returns `true` if the file was modified, `false` if no version field exists.
+fn bump_composer_version(project_root: &Utf8Path, version: &Version) -> BumpResult<bool> {
+    let composer_path = project_root.join("composer.json");
+    let content = match std::fs::read_to_string(&composer_path) {
+        Ok(c) => c,
+        Err(_) => return Ok(false),
+    };
+
+    let mut parsed: serde_json::Value =
+        serde_json::from_str(&content).map_err(|e| BumpError::ToolFailed {
+            tool: "composer.json".into(),
+            message: format!("failed to parse: {e}"),
+        })?;
+
+    // Only write if the field already exists — don't add it if absent
+    if parsed.get("version").and_then(|v| v.as_str()).is_none() {
+        return Ok(false);
+    }
+
+    parsed["version"] = serde_json::Value::String(version.to_string());
+
+    let output = serde_json::to_string_pretty(&parsed).map_err(|e| BumpError::ToolFailed {
+        tool: "composer.json".into(),
+        message: format!("failed to serialize: {e}"),
+    })?;
+
+    // Composer convention: trailing newline
+    std::fs::write(&composer_path, format!("{output}\n")).map_err(|e| BumpError::ToolFailed {
+        tool: "composer.json".into(),
+        message: format!("failed to write: {e}"),
+    })?;
+
+    debug!(%version, "bumped composer.json version");
+    Ok(true)
 }
 
 /// Generate or update the changelog.
