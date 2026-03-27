@@ -345,6 +345,39 @@ mod tests {
                     changelog_tool: None,
                 },
             },
+            Ecosystem::Python => ProjectDetection {
+                ecosystem: Ecosystem::Python,
+                version_strategy: VersionStrategy::Interactive,
+                tools: DetectedTools {
+                    test_cmd: "pytest".into(),
+                    build_cmd: "python -m build".into(),
+                    publish_cmd: Some("twine upload dist/*".into()),
+                    bump_cmd: None,
+                    changelog_tool: None,
+                },
+            },
+            Ecosystem::Ruby => ProjectDetection {
+                ecosystem: Ecosystem::Ruby,
+                version_strategy: VersionStrategy::Interactive,
+                tools: DetectedTools {
+                    test_cmd: "bundle exec rake test".into(),
+                    build_cmd: "gem build".into(),
+                    publish_cmd: Some("gem push".into()),
+                    bump_cmd: None,
+                    changelog_tool: None,
+                },
+            },
+            Ecosystem::Swift => ProjectDetection {
+                ecosystem: Ecosystem::Swift,
+                version_strategy: VersionStrategy::Interactive,
+                tools: DetectedTools {
+                    test_cmd: "swift test".into(),
+                    build_cmd: "swift build -c release".into(),
+                    publish_cmd: None,
+                    bump_cmd: None,
+                    changelog_tool: None,
+                },
+            },
             Ecosystem::Generic => ProjectDetection::generic(VersionStrategy::Interactive),
         }
     }
@@ -800,11 +833,16 @@ mod tests {
 
     #[test]
     fn check_release_branch_with_override_not_matching() {
-        // Use a branch name that definitely doesn't match current branch
+        // Use a branch name that definitely doesn't match current branch.
+        // In CI (detached HEAD), the message will be about detached HEAD
+        // rather than a branch mismatch — either way, it should fail.
         let result = check_release_branch(Some("this-branch-does-not-exist-xyz"));
         assert!(!result.passed);
-        assert!(result.message.contains("this-branch-does-not-exist-xyz"));
-        assert!(result.message.contains("expected"));
+        assert!(
+            result.message.contains("expected") || result.message.contains("Detached HEAD"),
+            "unexpected message: {}",
+            result.message
+        );
     }
 
     // ---------------------------------------------------------------

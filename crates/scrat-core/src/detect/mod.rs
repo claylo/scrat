@@ -43,12 +43,10 @@ pub fn resolve_detection(
     {
         debug!(%ecosystem, "using ecosystem from config override");
         let version_strategy = detect_version_strategy(project_root);
-        let detection = match ecosystem {
-            Ecosystem::Rust => rust::detect_rust(project_root, version_strategy),
-            Ecosystem::Node => detect_node_stub(version_strategy),
-            Ecosystem::Go => detect_go_stub(version_strategy),
-            Ecosystem::Php => detect_php_stub(version_strategy),
-            Ecosystem::Generic => ProjectDetection::generic(version_strategy),
+        let detection = if ecosystem == Ecosystem::Rust {
+            rust::detect_rust(project_root, version_strategy)
+        } else {
+            build_detection_for(ecosystem, version_strategy)
         };
         return Some(detection);
     }
@@ -69,14 +67,11 @@ pub fn detect_project(project_root: &Utf8Path) -> Option<ProjectDetection> {
     let version_strategy = detect_version_strategy(project_root);
     debug!(%version_strategy, "detected version strategy");
 
-    let detection = match ecosystem {
-        Ecosystem::Rust => rust::detect_rust(project_root, version_strategy),
-        Ecosystem::Node => detect_node_stub(version_strategy),
-        Ecosystem::Go => detect_go_stub(version_strategy),
-        Ecosystem::Php => detect_php_stub(version_strategy),
-        Ecosystem::Generic => ProjectDetection::generic(version_strategy),
+    let detection = if ecosystem == Ecosystem::Rust {
+        rust::detect_rust(project_root, version_strategy)
+    } else {
+        build_detection_for(ecosystem, version_strategy)
     };
-
     Some(detection)
 }
 
@@ -176,11 +171,73 @@ fn detect_php_stub(version_strategy: VersionStrategy) -> ProjectDetection {
 /// auto-detection returns `None`.
 pub fn build_detection(project_root: &Utf8Path, ecosystem: Ecosystem) -> ProjectDetection {
     let version_strategy = detect_version_strategy(project_root);
+    build_detection_for(ecosystem, version_strategy)
+}
+
+/// Map an ecosystem + version strategy to a [`ProjectDetection`].
+///
+/// Single source of truth for ecosystem → tool defaults. Used by
+/// `detect_project`, `resolve_detection`, and `build_detection`.
+fn build_detection_for(
+    ecosystem: Ecosystem,
+    version_strategy: VersionStrategy,
+) -> ProjectDetection {
+    use crate::ecosystem::DetectedTools;
+
     match ecosystem {
-        Ecosystem::Rust => rust::detect_rust(project_root, version_strategy),
+        Ecosystem::Rust => {
+            // Rust has full detection logic in its own module
+            // but we don't have project_root here — callers that need
+            // Rust-specific detection call rust::detect_rust directly.
+            // This arm is used only for config-override and user-selection paths.
+            ProjectDetection {
+                ecosystem: Ecosystem::Rust,
+                version_strategy,
+                tools: DetectedTools {
+                    test_cmd: "cargo test".into(),
+                    build_cmd: "cargo build --release".into(),
+                    publish_cmd: Some("cargo publish".into()),
+                    bump_cmd: None,
+                    changelog_tool: None,
+                },
+            }
+        }
         Ecosystem::Node => detect_node_stub(version_strategy),
         Ecosystem::Go => detect_go_stub(version_strategy),
         Ecosystem::Php => detect_php_stub(version_strategy),
+        Ecosystem::Python => ProjectDetection {
+            ecosystem: Ecosystem::Python,
+            version_strategy,
+            tools: DetectedTools {
+                test_cmd: "pytest".into(),
+                build_cmd: "python -m build".into(),
+                publish_cmd: Some("twine upload dist/*".into()),
+                bump_cmd: None,
+                changelog_tool: None,
+            },
+        },
+        Ecosystem::Ruby => ProjectDetection {
+            ecosystem: Ecosystem::Ruby,
+            version_strategy,
+            tools: DetectedTools {
+                test_cmd: "bundle exec rake test".into(),
+                build_cmd: "gem build".into(),
+                publish_cmd: Some("gem push".into()),
+                bump_cmd: None,
+                changelog_tool: None,
+            },
+        },
+        Ecosystem::Swift => ProjectDetection {
+            ecosystem: Ecosystem::Swift,
+            version_strategy,
+            tools: DetectedTools {
+                test_cmd: "swift test".into(),
+                build_cmd: "swift build -c release".into(),
+                publish_cmd: None,
+                bump_cmd: None,
+                changelog_tool: None,
+            },
+        },
         Ecosystem::Generic => ProjectDetection::generic(version_strategy),
     }
 }

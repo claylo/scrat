@@ -19,6 +19,12 @@ pub enum Ecosystem {
     Go,
     /// PHP project (detected via `composer.json`).
     Php,
+    /// Python project (detected via `pyproject.toml`).
+    Python,
+    /// Ruby project (detected via `Gemfile`).
+    Ruby,
+    /// Swift project (detected via `Package.swift`).
+    Swift,
     /// Generic project — no ecosystem-specific behavior.
     ///
     /// Selected interactively when auto-detection finds no marker files,
@@ -35,6 +41,9 @@ impl fmt::Display for Ecosystem {
             Self::Node => write!(f, "node"),
             Self::Go => write!(f, "go"),
             Self::Php => write!(f, "php"),
+            Self::Python => write!(f, "python"),
+            Self::Ruby => write!(f, "ruby"),
+            Self::Swift => write!(f, "swift"),
             Self::Generic => write!(f, "generic"),
         }
     }
@@ -50,6 +59,9 @@ impl Ecosystem {
             Self::Node => Some("package.json"),
             Self::Go => Some("go.mod"),
             Self::Php => Some("composer.json"),
+            Self::Python => Some("pyproject.toml"),
+            Self::Ruby => Some("Gemfile"),
+            Self::Swift => Some("Package.swift"),
             Self::Generic => None,
         }
     }
@@ -63,6 +75,9 @@ impl Ecosystem {
             Self::Node => Some("package-lock.json"),
             Self::Go => Some("go.mod"),
             Self::Php => Some("composer.lock"),
+            Self::Python => Some("uv.lock"),
+            Self::Ruby => Some("Gemfile.lock"),
+            Self::Swift => Some("Package.resolved"),
             Self::Generic => None,
         }
     }
@@ -71,10 +86,27 @@ impl Ecosystem {
     ///
     /// [`Generic`](Self::Generic) is excluded — it is only selected
     /// interactively or via config override.
-    pub const AUTO_DETECTABLE: &[Self] = &[Self::Rust, Self::Node, Self::Go, Self::Php];
+    pub const AUTO_DETECTABLE: &[Self] = &[
+        Self::Rust,
+        Self::Node,
+        Self::Go,
+        Self::Php,
+        Self::Python,
+        Self::Ruby,
+        Self::Swift,
+    ];
 
     /// All ecosystem variants, including [`Generic`](Self::Generic).
-    pub const ALL: &[Self] = &[Self::Rust, Self::Node, Self::Go, Self::Php, Self::Generic];
+    pub const ALL: &[Self] = &[
+        Self::Rust,
+        Self::Node,
+        Self::Go,
+        Self::Php,
+        Self::Python,
+        Self::Ruby,
+        Self::Swift,
+        Self::Generic,
+    ];
 }
 
 /// Version-determination strategy.

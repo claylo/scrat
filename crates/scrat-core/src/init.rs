@@ -194,6 +194,20 @@ fn build_commands_section(selections: &InitSelections) -> String {
                 Ecosystem::Php => {
                     lines.push("# test = \"composer test\"".to_string());
                 }
+                Ecosystem::Python => {
+                    lines.push("# test = \"pytest\"".to_string());
+                    lines.push("# build = \"python -m build\"".to_string());
+                    lines.push("# publish = \"twine upload dist/*\"".to_string());
+                }
+                Ecosystem::Ruby => {
+                    lines.push("# test = \"bundle exec rake test\"".to_string());
+                    lines.push("# build = \"gem build\"".to_string());
+                    lines.push("# publish = \"gem push\"".to_string());
+                }
+                Ecosystem::Swift => {
+                    lines.push("# test = \"swift test\"".to_string());
+                    lines.push("# build = \"swift build -c release\"".to_string());
+                }
                 Ecosystem::Generic => {
                     lines.push("# test = \"make test\"".to_string());
                     lines.push("# build = \"make build\"".to_string());
@@ -220,6 +234,20 @@ fn build_commands_section(selections: &InitSelections) -> String {
                 }
                 Ecosystem::Php => {
                     lines.push("#   test: composer test".to_string());
+                }
+                Ecosystem::Python => {
+                    lines.push("#   test: pytest".to_string());
+                    lines.push("#   build: python -m build".to_string());
+                    lines.push("#   publish: twine upload dist/*".to_string());
+                }
+                Ecosystem::Ruby => {
+                    lines.push("#   test: bundle exec rake test".to_string());
+                    lines.push("#   build: gem build".to_string());
+                    lines.push("#   publish: gem push".to_string());
+                }
+                Ecosystem::Swift => {
+                    lines.push("#   test: swift test".to_string());
+                    lines.push("#   build: swift build -c release".to_string());
                 }
                 Ecosystem::Generic => {
                     lines.push("#   test: make test".to_string());
