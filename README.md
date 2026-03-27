@@ -41,7 +41,7 @@ Every release I've ever done by hand has the same steps:
 run tests, bump versions, update the changelog, commit, tag, push, create a GitHub release,
 attach assets, and try not to forget something.
 Most tools automate one or two of those steps.
-scrat automates all of them—and the ones it doesn't know about, you wire up with hooks.
+scrat automates all of them—and the ones it doesn't know about, you can wire up with hooks.
 
 **Design principles:**
 

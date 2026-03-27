@@ -46,9 +46,9 @@ license:
 - Apache-2.0
 - MIT
 lint_level: strict
-msrv: 1.88.0
+msrv: 1.89.0
 owner: claylo
-pinned_dev_toolchain: 1.93.0
+pinned_dev_toolchain: 1.94.0
 preset: standard
 project_description: Release management tooling focused on sanity retention
 project_name: scrat
