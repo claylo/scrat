@@ -27,7 +27,7 @@ log_level: info
 # - /var/log/scrat.jsonl (Unix, if writable)
 # - ~/.local/share/scrat/logs/scrat.jsonl (fallback)
 # Override with environment variables:
-# - SCRAT_LOG_PATH=/path/to/scrat.jsonl
+# - SCRAT_LOG_PATH=/path/to/scrat.jsonl  (rotated daily)
 # - SCRAT_LOG_DIR=/path/to/log/dir
 # - SCRAT_ENV=dev
 # Config options:

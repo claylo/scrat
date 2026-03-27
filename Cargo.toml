@@ -29,7 +29,6 @@ nursery = "warn"
 
 # Optimize dependencies in dev mode for faster tests
 # (keeps main crate unoptimized for fast incremental builds)
-# don't emit debuginfo for *dependencies* in dev builds
 [profile.dev.package."*"]
 debug = 0
 opt-level = 1
@@ -45,15 +44,15 @@ debug = "line-tables-only"
 opt-level = 1
 # On macOS, keep debug info from exploding into huge scattered dSYM trees
 split-debuginfo = "packed"
-codegen-units = 256 # default, but worth being explicit
+codegen-units = 256
 
 # Test profile with full debug symbols for profiling
 [profile.test]
 inherits = "dev"
-codegen-units = 256 # more parallelism = faster compile
+codegen-units = 256
 debug = true
 
-# Release profile with reduced debug info for smaller binaries
+# Release profile with reduced debug info
 [profile.release]
 debug = "line-tables-only"
 

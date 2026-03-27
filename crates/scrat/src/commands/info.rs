@@ -2,12 +2,11 @@
 
 use clap::Args;
 use owo_colors::OwoColorize;
-use serde::Serialize;
-use tracing::{debug, instrument};
-
-use scrat_core::config::{self, Config};
+use scrat_core::config::{Config, ConfigSources};
 use scrat_core::detect;
 use scrat_core::ecosystem::ProjectDetection;
+use serde::Serialize;
+use tracing::{debug, instrument};
 
 /// Arguments for the `info` subcommand.
 #[derive(Args, Debug, Default)]
@@ -52,9 +51,9 @@ struct ConfigInfo {
 }
 
 impl ConfigInfo {
-    fn from_config(config: &Config, cwd: &camino::Utf8Path) -> Self {
+    fn from_config(config: &Config, sources: &ConfigSources) -> Self {
         Self {
-            config_file: config::find_project_config(cwd).map(|p| p.to_string()),
+            config_file: sources.primary_file().map(|p| p.to_string()),
             log_level: config.log_level.as_str().to_string(),
             log_dir: config.log_dir.as_ref().map(|p| p.to_string()),
         }
@@ -75,21 +74,22 @@ struct FullInfo {
 /// # Arguments
 /// * `global_json` - Global `--json` flag from CLI
 /// * `config` - Loaded configuration
+/// * `sources` - Config source metadata from loading
 /// * `cwd` - Current working directory for config discovery and detection
 #[instrument(name = "cmd_info", skip_all, fields(json_output))]
 pub fn cmd_info(
     _args: InfoArgs,
     global_json: bool,
     config: &Config,
+    sources: &ConfigSources,
     cwd: &camino::Utf8Path,
 ) -> anyhow::Result<()> {
     let info = PackageInfo::new();
 
     debug!(json_output = global_json, "executing info command");
 
-    let config_info = ConfigInfo::from_config(config, cwd);
+    let config_info = ConfigInfo::from_config(config, sources);
     let detection = detect::resolve_detection(cwd, config);
-
     let full_info = FullInfo {
         package: info,
         config: config_info,
@@ -190,25 +190,47 @@ mod tests {
         Config::default()
     }
 
+    fn test_sources() -> ConfigSources {
+        ConfigSources::default()
+    }
+
     fn test_cwd() -> camino::Utf8PathBuf {
         camino::Utf8PathBuf::from("/tmp")
     }
 
     #[test]
     fn test_cmd_info_text_succeeds() {
-        assert!(cmd_info(InfoArgs::default(), false, &test_config(), &test_cwd()).is_ok());
+        assert!(
+            cmd_info(
+                InfoArgs::default(),
+                false,
+                &test_config(),
+                &test_sources(),
+                &test_cwd()
+            )
+            .is_ok()
+        );
     }
 
     #[test]
     fn test_cmd_info_json_via_global() {
-        assert!(cmd_info(InfoArgs::default(), true, &test_config(), &test_cwd()).is_ok());
+        assert!(
+            cmd_info(
+                InfoArgs::default(),
+                true,
+                &test_config(),
+                &test_sources(),
+                &test_cwd()
+            )
+            .is_ok()
+        );
     }
 
     #[test]
     fn test_config_info_no_file() {
         let config = Config::default();
-        let cwd = camino::Utf8PathBuf::from("/nonexistent");
-        let info = ConfigInfo::from_config(&config, &cwd);
+        let sources = ConfigSources::default();
+        let info = ConfigInfo::from_config(&config, &sources);
         assert!(info.config_file.is_none());
         assert_eq!(info.log_level, "info");
     }

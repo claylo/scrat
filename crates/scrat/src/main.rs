@@ -2,17 +2,21 @@
 #![deny(unsafe_code)]
 
 use anyhow::Context;
-use clap::Parser;
-use scrat::{Cli, Commands, commands};
+use clap::FromArgMatches;
+use scrat::{commands, Cli, Commands};
 use scrat_core::config::ConfigLoader;
 use tracing::debug;
 
-mod observability;
+use scrat_core::observability;
 
 fn main() -> anyhow::Result<()> {
+    // Use scrat::command() which adds the custom -h/--help flag back
+    // (Cli derive has disable_help_flag = true so we can use HelpShort).
     // Intercept --version to render the :shipit: squirrel before the version string.
-    let cli = match Cli::try_parse() {
-        Ok(cli) => cli,
+    let cli = match scrat::command().try_get_matches() {
+        Ok(matches) => {
+            Cli::from_arg_matches(&matches).expect("clap mismatch between Cli derive and command()")
+        }
         Err(e) if e.kind() == clap::error::ErrorKind::DisplayVersion => {
             scrat::terminal::render_shipit();
             e.print().expect("failed to write version");
@@ -20,6 +24,7 @@ fn main() -> anyhow::Result<()> {
         }
         Err(e) => e.exit(),
     };
+
     cli.color.apply();
 
     if cli.version_only {
@@ -54,7 +59,7 @@ fn main() -> anyhow::Result<()> {
         })?;
         loader = loader.with_file(&config_path);
     }
-    let config = loader.load().context("failed to load configuration")?;
+    let (config, config_sources) = loader.load().context("failed to load configuration")?;
 
     let obs_config = observability::ObservabilityConfig::from_env_with_overrides(
         config
@@ -77,9 +82,13 @@ fn main() -> anyhow::Result<()> {
 
     // Execute command
     let result = match command {
-        Commands::Doctor(args) => commands::doctor::cmd_doctor(args, cli.json, &cwd),
+        Commands::Doctor(args) => {
+            commands::doctor::cmd_doctor(args, cli.json, &config_sources, &cwd)
+        }
         Commands::Init(args) => commands::init::cmd_init(args, cli.json, &cwd),
-        Commands::Info(args) => commands::info::cmd_info(args, cli.json, &config, &cwd),
+        Commands::Info(args) => {
+            commands::info::cmd_info(args, cli.json, &config, &config_sources, &cwd)
+        }
         Commands::Preflight(args) => {
             commands::preflight::cmd_preflight(args, cli.json, &config, &cwd)
         }

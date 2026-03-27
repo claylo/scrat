@@ -4,9 +4,10 @@ use clap::Args;
 use indicatif::{ProgressBar, ProgressStyle};
 use inquire::Confirm;
 use owo_colors::OwoColorize;
-use scrat_core::config;
+use scrat_core::config::{self, ConfigSources};
 use serde::Serialize;
 use tracing::{debug, instrument};
+
 /// Arguments for the `doctor` subcommand.
 #[derive(Args, Debug, Default)]
 pub struct DoctorArgs {
@@ -52,9 +53,7 @@ struct EnvVar {
 }
 
 impl DoctorReport {
-    fn gather(cwd: &camino::Utf8Path) -> Self {
-        let config_file = config::find_project_config(cwd);
-
+    fn gather(sources: &ConfigSources, cwd: &camino::Utf8Path) -> Self {
         Self {
             directories: DirectoryPaths {
                 config: config::user_config_dir().map(|p| p.to_string()),
@@ -63,8 +62,8 @@ impl DoctorReport {
                 data_local: config::user_data_local_dir().map(|p| p.to_string()),
             },
             config: ConfigStatus {
-                found: config_file.is_some(),
-                file: config_file.map(|p| p.to_string()),
+                found: sources.primary_file().is_some(),
+                file: sources.primary_file().map(|p| p.to_string()),
             },
             environment: EnvironmentInfo {
                 cwd: Some(cwd.to_string()),
@@ -99,15 +98,16 @@ impl DoctorReport {
 ///
 /// # Arguments
 /// * `global_json` - Global `--json` flag from CLI
+/// * `sources` - Config source metadata from loading
 /// * `cwd` - Current working directory
 #[instrument(name = "cmd_doctor", skip_all, fields(json_output))]
 pub fn cmd_doctor(
     _args: DoctorArgs,
     global_json: bool,
+    sources: &ConfigSources,
     cwd: &camino::Utf8Path,
 ) -> anyhow::Result<()> {
     debug!(json_output = global_json, "executing doctor command");
-
     let spinner = ProgressBar::new_spinner();
     spinner.set_style(
         ProgressStyle::default_spinner()
@@ -117,8 +117,9 @@ pub fn cmd_doctor(
     spinner.set_message("Gathering diagnostics...");
     spinner.enable_steady_tick(std::time::Duration::from_millis(80));
 
-    let report = DoctorReport::gather(cwd);
+    let report = DoctorReport::gather(sources, cwd);
     spinner.finish_and_clear();
+
     if global_json {
         println!("{}", serde_json::to_string_pretty(&report)?);
     } else {
@@ -230,19 +231,23 @@ mod tests {
         camino::Utf8PathBuf::from("/tmp")
     }
 
+    fn test_sources() -> ConfigSources {
+        ConfigSources::default()
+    }
+
     #[test]
     fn test_cmd_doctor_text_succeeds() {
-        assert!(cmd_doctor(DoctorArgs::default(), false, &test_cwd()).is_ok());
+        assert!(cmd_doctor(DoctorArgs::default(), false, &test_sources(), &test_cwd()).is_ok());
     }
 
     #[test]
     fn test_cmd_doctor_json_succeeds() {
-        assert!(cmd_doctor(DoctorArgs::default(), true, &test_cwd()).is_ok());
+        assert!(cmd_doctor(DoctorArgs::default(), true, &test_sources(), &test_cwd()).is_ok());
     }
 
     #[test]
     fn test_doctor_report_gathers() {
-        let report = DoctorReport::gather(&test_cwd());
+        let report = DoctorReport::gather(&test_sources(), &test_cwd());
         // On most systems, at least config dir should resolve
         assert!(report.directories.config.is_some() || report.directories.cache.is_some());
     }

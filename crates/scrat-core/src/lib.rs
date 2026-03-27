@@ -55,6 +55,8 @@ pub mod init;
 
 pub mod notes;
 
+pub mod observability;
+
 pub mod pipeline;
 
 pub mod preflight;

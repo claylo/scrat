@@ -31,3 +31,15 @@ updates:
     labels:
       - "dependencies"
       - "github-actions"
+
+  # npm dependencies
+  - package-ecosystem: "npm"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    # Disable automatic PRs - we use the issues workflow instead
+    open-pull-requests-limit: 0
+    labels:
+      - "dependencies"
+      - "npm"

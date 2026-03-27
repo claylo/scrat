@@ -1305,14 +1305,13 @@ dependencies = [
  "serde_json",
  "tempfile",
  "tracing",
- "tracing-appender",
- "tracing-subscriber",
 ]
 
 [[package]]
 name = "scrat-core"
 version = "0.1.0"
 dependencies = [
+ "anyhow",
  "camino",
  "clap",
  "directories",
@@ -1323,6 +1322,8 @@ dependencies = [
  "tempfile",
  "thiserror",
  "tracing",
+ "tracing-appender",
+ "tracing-subscriber",
  "which",
 ]
 

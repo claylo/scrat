@@ -22,3 +22,6 @@ dependabot_security_updates: true
 # 1Password secrets sync (optional)
 # secrets_tags: github-actions
 # secrets_app: actions
+
+variables:
+  CRATES_IO_ENABLED: true

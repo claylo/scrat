@@ -3,7 +3,6 @@
 //! **Important**: This module never writes to stdout, which is reserved for
 //! application output (e.g., MCP server communication). All logging goes to
 //! files or stderr.
-
 use anyhow::Result;
 use serde_json::{Map, Value};
 use std::fs::OpenOptions;
@@ -14,7 +13,6 @@ use tracing_subscriber::filter::EnvFilter;
 use tracing_subscriber::layer::{Context as LayerContext, SubscriberExt};
 use tracing_subscriber::registry::LookupSpan;
 use tracing_subscriber::util::SubscriberInitExt;
-
 const ENV_LOG_PATH: &str = "SCRAT_LOG_PATH";
 const ENV_LOG_DIR: &str = "SCRAT_LOG_DIR";
 const DEFAULT_LOG_DIR_UNIX: &str = "/var/log";

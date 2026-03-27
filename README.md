@@ -497,6 +497,11 @@ assets = ["dist/release-card.png"]
 | `--dry-run` | Preview without making changes |
 | `-y, --yes` | Skip confirmation prompt |
 
+### Crate Organization
+
+- **scrat** - The CLI binary. Handles argument parsing, command dispatch, and user interaction.
+- **scrat-core** - The core library. Contains configuration loading, error types, and shared functionality.
+
 
 ## Installation
 

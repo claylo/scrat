@@ -18,8 +18,9 @@ on:
         type: boolean
         default: false
 
-permissions:
-  contents: write
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
 
 env:
   CARGO_TERM_COLOR: always
@@ -29,6 +30,9 @@ jobs:
     name: Check for release
     if: vars.AUTO_RELEASE_ENABLED == 'true'
     runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
     outputs:
       should_release: ${{ steps.check.outputs.should_release }}
       next_version: ${{ steps.check.outputs.next_version }}
@@ -45,12 +49,14 @@ jobs:
           tag=$(git describe --tags --abbrev=0 2>/dev/null || echo "v0.0.0")
           echo "tag=${tag}" >> $GITHUB_OUTPUT
 
+      - name: Install git-cliff
+        uses: ./.github/actions/setup-cargo-tools
+        with:
+          binstall-tools: git-cliff
+
       - name: Check for releasable commits
         id: check
         run: |
-          # Install git-cliff
-          cargo install git-cliff
-
           # Get the bumped version from git-cliff
           next_version=$(git cliff --bumped-version 2>/dev/null || echo "")
 
@@ -73,17 +79,23 @@ jobs:
 
       - name: Generate changelog
         if: steps.check.outputs.should_release == 'true'
-        uses: orhun/git-cliff-action@c93ef52f3d0ddcdcc9bd5447d98d458a11cd4f72 # v4.7.1
         id: changelog
-        with:
-          config: cliff.toml
-          args: -vv --unreleased --strip all
+        run: |
+          content=$(git cliff --config cliff.toml -vv --unreleased --strip all 2>/dev/null)
+          {
+            echo "content<<CHANGELOG_EOF"
+            echo "$content"
+            echo "CHANGELOG_EOF"
+          } >> $GITHUB_OUTPUT
 
   create-release:
     name: Create release
     needs: check-release
     if: needs.check-release.outputs.should_release == 'true'
     runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
     steps:
       - name: Checkout
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2

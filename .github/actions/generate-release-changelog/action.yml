@@ -1,0 +1,35 @@
+name: 'Generate Release Changelog'
+description: 'Extract version from tag and generate changelog with git-cliff'
+
+outputs:
+  version:
+    description: 'Release version without v prefix'
+    value: ${{ steps.version.outputs.version }}
+  release_body:
+    description: 'Generated changelog content for the release'
+    value: ${{ steps.changelog.outputs.content }}
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Extract version
+      id: version
+      shell: bash
+      run: echo "version=${GITHUB_REF#refs/tags/v}" >> $GITHUB_OUTPUT
+
+    - name: Install git-cliff
+      uses: ./.github/actions/setup-cargo-tools
+      with:
+        binstall-tools: git-cliff
+
+    - name: Generate changelog
+      id: changelog
+      shell: bash
+      run: |
+        content=$(git cliff --config cliff.toml -vv --latest --no-exec --github-repo "${{ github.repository }}" 2>/dev/null)
+        {
+          echo "content<<CHANGELOG_EOF"
+          echo "$content"
+          echo "CHANGELOG_EOF"
+        } >> $GITHUB_OUTPUT
+

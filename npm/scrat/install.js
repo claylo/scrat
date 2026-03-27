@@ -3,6 +3,10 @@ const fs = require("fs");
 const path = require("path");
 const zlib = require("zlib");
 
+const MAX_REDIRECTS = 5;
+const MAX_DOWNLOAD_BYTES = 50 * 1024 * 1024; // 50 MiB
+const REQUEST_TIMEOUT_MS = 30_000; // 30 seconds
+
 const PLATFORMS = {
   "darwin-arm64": "@claylo/scrat-darwin-arm64",
   "darwin-x64": "@claylo/scrat-darwin-x64",
@@ -52,16 +56,53 @@ async function install() {
   });
 }
 
-function download(url) {
+function download(url, redirectCount = 0) {
   return new Promise((resolve, reject) => {
-    https.get(url, (res) => {
-      if (res.statusCode === 302 || res.statusCode === 301) {
-        return download(res.headers.location).then(resolve, reject);
+    if (redirectCount > MAX_REDIRECTS) {
+      return reject(new Error(`Too many redirects (>${MAX_REDIRECTS})`));
+    }
+
+    const req = https.get(url, (res) => {
+      if (res.statusCode === 301 || res.statusCode === 302) {
+        const location = res.headers.location;
+        if (!location || !location.startsWith("https://")) {
+          return reject(
+            new Error(`Redirect to non-HTTPS URL: ${location ?? "(empty)"}`),
+          );
+        }
+        res.resume(); // drain the response
+        return download(location, redirectCount + 1).then(resolve, reject);
       }
+
+      if (res.statusCode < 200 || res.statusCode >= 300) {
+        res.resume();
+        return reject(
+          new Error(`HTTP ${res.statusCode} from ${url}`),
+        );
+      }
+
       const chunks = [];
-      res.on("data", (chunk) => chunks.push(chunk));
+      let totalBytes = 0;
+      res.on("data", (chunk) => {
+        totalBytes += chunk.length;
+        if (totalBytes > MAX_DOWNLOAD_BYTES) {
+          res.destroy();
+          return reject(
+            new Error(
+              `Download exceeds ${MAX_DOWNLOAD_BYTES} bytes limit`,
+            ),
+          );
+        }
+        chunks.push(chunk);
+      });
       res.on("end", () => resolve(Buffer.concat(chunks)));
       res.on("error", reject);
+    });
+
+    req.on("error", reject);
+    req.setTimeout(REQUEST_TIMEOUT_MS, () => {
+      req.destroy();
+      reject(new Error(`Request timed out after ${REQUEST_TIMEOUT_MS}ms`));
     });
   });
 }
@@ -79,6 +120,10 @@ function extractTar(buffer) {
 
     offset += 512;
     if (size > 0) {
+      // Reject path traversal and absolute paths
+      if (name.startsWith("/") || name.split("/").includes("..")) {
+        throw new Error(`Unsafe tar entry path: ${name}`);
+      }
       files.push({ name, data: buffer.slice(offset, offset + size) });
       offset += Math.ceil(size / 512) * 512;
     }

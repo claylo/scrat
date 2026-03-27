@@ -44,7 +44,6 @@ information or guidance.
 ## Scope
 
 This security policy applies to:
-
 - The scrat CLI tool
 - The scrat-core library
 - Official distribution channels (crates.io, GitHub releases)
