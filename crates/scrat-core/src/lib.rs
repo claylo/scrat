@@ -26,7 +26,7 @@
 //! ```no_run
 //! use scrat_core::{Config, ConfigLoader};
 //!
-//! let config = ConfigLoader::new()
+//! let (config, sources) = ConfigLoader::new()
 //!     .with_user_config(true)
 //!     .load()
 //!     .expect("Failed to load configuration");

@@ -3,7 +3,7 @@
 
 use anyhow::Context;
 use clap::FromArgMatches;
-use scrat::{commands, Cli, Commands};
+use scrat::{Cli, Commands, commands};
 use scrat_core::config::ConfigLoader;
 use tracing::debug;
 

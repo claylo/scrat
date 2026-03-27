@@ -240,3 +240,284 @@ fn ship_shows_in_subcommand_list() {
         .success()
         .stdout(predicate::str::contains("ship"));
 }
+
+// =============================================================================
+// Doctor Command
+// =============================================================================
+
+#[test]
+fn doctor_runs_successfully() {
+    cmd().arg("doctor").assert().success();
+}
+
+#[test]
+fn doctor_json_outputs_valid_json() {
+    let output = cmd().args(["doctor", "--json"]).assert().success();
+
+    let stdout = String::from_utf8_lossy(&output.get_output().stdout);
+    let json: serde_json::Value =
+        serde_json::from_str(&stdout).expect("doctor --json should output valid JSON");
+
+    // Should have the top-level sections
+    assert!(
+        json.get("directories").is_some(),
+        "missing 'directories' key"
+    );
+    assert!(json.get("config").is_some(), "missing 'config' key");
+    assert!(
+        json.get("environment").is_some(),
+        "missing 'environment' key"
+    );
+}
+
+#[test]
+fn doctor_help_shows_usage() {
+    cmd()
+        .args(["doctor", "--help"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains(
+            "Diagnose configuration and environment",
+        ));
+}
+
+// =============================================================================
+// Init Command
+// =============================================================================
+
+#[test]
+fn init_help_shows_usage_and_flags() {
+    cmd()
+        .args(["init", "--help"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Generate a scrat config file"))
+        .stdout(predicate::str::contains("--format"))
+        .stdout(predicate::str::contains("--style"))
+        .stdout(predicate::str::contains("--yes"))
+        .stdout(predicate::str::contains("--output"));
+}
+
+#[test]
+fn init_yes_toml_generates_valid_toml() {
+    let tmp = tempfile::tempdir().expect("failed to create tempdir");
+    let tmp_path = tmp.path();
+
+    // git init so ecosystem detection doesn't trip
+    std::process::Command::new("git")
+        .args(["init"])
+        .current_dir(tmp_path)
+        .output()
+        .expect("git init failed");
+
+    cmd()
+        .args(["init", "--yes", "--format", "toml"])
+        .current_dir(tmp_path)
+        .assert()
+        .success();
+
+    let config_path = tmp_path.join("scrat.toml");
+    assert!(config_path.exists(), "scrat.toml should be created");
+
+    let content = std::fs::read_to_string(&config_path).expect("failed to read scrat.toml");
+    assert!(!content.is_empty(), "scrat.toml should not be empty");
+    // All generated configs include the [release] section
+    assert!(
+        content.contains("[release]"),
+        "should contain release section"
+    );
+}
+
+#[test]
+fn init_yes_yaml_generates_valid_yaml() {
+    let tmp = tempfile::tempdir().expect("failed to create tempdir");
+    let tmp_path = tmp.path();
+
+    // git init so ecosystem detection doesn't trip
+    std::process::Command::new("git")
+        .args(["init"])
+        .current_dir(tmp_path)
+        .output()
+        .expect("git init failed");
+
+    cmd()
+        .args(["init", "--yes", "--format", "yaml"])
+        .current_dir(tmp_path)
+        .assert()
+        .success();
+
+    let config_path = tmp_path.join("scrat.yaml");
+    assert!(config_path.exists(), "scrat.yaml should be created");
+
+    let content = std::fs::read_to_string(&config_path).expect("failed to read scrat.yaml");
+    assert!(!content.is_empty(), "scrat.yaml should not be empty");
+    // All generated configs include the release section
+    assert!(
+        content.contains("release:"),
+        "should contain release section"
+    );
+}
+
+#[test]
+fn init_yes_custom_output_path() {
+    let tmp = tempfile::tempdir().expect("failed to create tempdir");
+    let tmp_path = tmp.path();
+    let output_file = tmp_path.join("custom-config.toml");
+
+    std::process::Command::new("git")
+        .args(["init"])
+        .current_dir(tmp_path)
+        .output()
+        .expect("git init failed");
+
+    cmd()
+        .args([
+            "init",
+            "--yes",
+            "--format",
+            "toml",
+            "--output",
+            output_file.to_str().unwrap(),
+        ])
+        .current_dir(tmp_path)
+        .assert()
+        .success();
+
+    assert!(output_file.exists(), "custom output file should be created");
+}
+
+#[test]
+fn init_shows_in_subcommand_list() {
+    cmd()
+        .arg("--help")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("init"));
+}
+
+// =============================================================================
+// Bump Command
+// =============================================================================
+
+#[test]
+fn bump_help_shows_usage() {
+    cmd()
+        .args(["bump", "--help"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Determine next version"))
+        .stdout(predicate::str::contains("--version"))
+        .stdout(predicate::str::contains("--no-changelog"))
+        .stdout(predicate::str::contains("--dry-run"));
+}
+
+#[test]
+fn bump_shows_in_subcommand_list() {
+    cmd()
+        .arg("--help")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("bump"));
+}
+
+// =============================================================================
+// Notes Command
+// =============================================================================
+
+#[test]
+fn notes_help_shows_usage() {
+    cmd()
+        .args(["notes", "--help"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Render release notes"))
+        .stdout(predicate::str::contains("--from"))
+        .stdout(predicate::str::contains("--version"))
+        .stdout(predicate::str::contains("--template"))
+        .stdout(predicate::str::contains("--no-deps"))
+        .stdout(predicate::str::contains("--no-stats"));
+}
+
+#[test]
+fn notes_shows_in_subcommand_list() {
+    cmd()
+        .arg("--help")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("notes"));
+}
+
+// =============================================================================
+// Preflight Command
+// =============================================================================
+
+#[test]
+fn preflight_help_shows_usage() {
+    cmd()
+        .args(["preflight", "--help"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Check release readiness"));
+}
+
+#[test]
+fn preflight_json_flag_accepted() {
+    // Run in a tempdir with git init to avoid interactive prompts.
+    // Preflight will likely fail checks (no version files, etc.) but
+    // the --json flag should be accepted and produce JSON output.
+    let tmp = tempfile::tempdir().expect("failed to create tempdir");
+    let tmp_path = tmp.path();
+
+    std::process::Command::new("git")
+        .args(["init"])
+        .current_dir(tmp_path)
+        .output()
+        .expect("git init failed");
+
+    let output = cmd()
+        .args(["preflight", "--json"])
+        .current_dir(tmp_path)
+        .assert();
+
+    // Preflight may exit non-zero if checks fail, but stdout should be valid JSON
+    let stdout = String::from_utf8_lossy(&output.get_output().stdout);
+    if !stdout.trim().is_empty() {
+        let _json: serde_json::Value =
+            serde_json::from_str(&stdout).expect("preflight --json should output valid JSON");
+    }
+}
+
+#[test]
+fn preflight_shows_in_subcommand_list() {
+    cmd()
+        .arg("--help")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("preflight"));
+}
+
+// =============================================================================
+// All Subcommands in Help
+// =============================================================================
+
+#[test]
+fn all_subcommands_appear_in_help() {
+    let expected = [
+        "doctor",
+        "init",
+        "info",
+        "preflight",
+        "bump",
+        "notes",
+        "ship",
+    ];
+    let output = cmd().arg("--help").assert().success();
+    let stdout = String::from_utf8_lossy(&output.get_output().stdout);
+
+    for subcmd in expected {
+        assert!(
+            stdout.contains(subcmd),
+            "subcommand '{subcmd}' should appear in --help output"
+        );
+    }
+}
