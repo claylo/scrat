@@ -1,5 +1,5 @@
 # Changes here will be overwritten by Copier
-_commit: v1.0.0-beta.2
+_commit: v1.1.0
 _src_path: gh:claylo/claylo-rs
 categories:
 - command-line-utilities
@@ -11,8 +11,6 @@ has_agents_md: true
 has_attestations: true
 has_benchmarks: false
 has_claude: true
-has_claude_commands: true
-has_claude_skills: true
 has_cli: true
 has_coda: true
 has_community_files: false
@@ -26,7 +24,6 @@ has_indicatif: true
 has_inquire: true
 has_issue_templates: true
 has_jsonl_logging: true
-has_just: true
 has_mcp_server: false
 has_md: true
 has_md_strict: false
@@ -36,9 +33,6 @@ has_releases: true
 has_roadmap_votes: false
 has_security_md: true
 has_site: false
-has_skill_capturing_decisions: true
-has_skill_markdown_authoring: true
-has_skill_using_git: true
 has_yamlfmt: false
 has_yamllint: false
 hook_system: none
@@ -48,7 +42,7 @@ license:
 lint_level: strict
 msrv: 1.89.0
 owner: claylo
-pinned_dev_toolchain: 1.94.0
+pinned_dev_toolchain: 1.94.1
 preset: standard
 project_description: Release management tooling focused on sanity retention
 project_name: scrat

@@ -10,6 +10,10 @@ permissions:
   id-token: write      # Sigstore OIDC for attestations
   attestations: write  # Persist attestations
 
+concurrency:
+  group: cd-${{ github.ref }}
+  cancel-in-progress: false
+
 env:
   CARGO_TERM_COLOR: always
   PROJECT_NAME: scrat
@@ -18,30 +22,27 @@ jobs:
   generate-changelog:
     name: Generate changelog
     runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
     outputs:
-      release_body: ${{ steps.git-cliff.outputs.content }}
-      version: ${{ steps.version.outputs.version }}
+      release_body: ${{ steps.changelog.outputs.release_body }}
+      version: ${{ steps.changelog.outputs.version }}
     steps:
       - name: Checkout
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           fetch-depth: 0
 
-      - name: Extract version
-        id: version
-        run: echo "version=${GITHUB_REF#refs/tags/v}" >> $GITHUB_OUTPUT
-
-      - name: Generate changelog
-        uses: orhun/git-cliff-action@c93ef52f3d0ddcdcc9bd5447d98d458a11cd4f72 # v4.7.1
-        id: git-cliff
-        with:
-          config: cliff.toml
-          args: -vv --latest --no-exec --github-repo ${{ github.repository }}
+      - name: Generate release changelog
+        id: changelog
+        uses: ./.github/actions/generate-release-changelog
 
   publish-binaries:
     name: Build ${{ matrix.build.NAME }}
     needs: generate-changelog
     runs-on: ${{ matrix.build.os }}
+    timeout-minutes: 60
     strategy:
       fail-fast: false
       matrix:
@@ -172,7 +173,7 @@ jobs:
 
       - name: Upload release
         if: ${{ !contains(github.ref, '-') }}
-        uses: svenstaro/upload-release-action@6b7fa9f267e90b50a19fef07b3596790bb941741 # 2.11.3
+        uses: svenstaro/upload-release-action@29e53e917877a24fad85510ded594ab3c9ca12de # 2.11.5
         with:
           repo_token: ${{ secrets.GITHUB_TOKEN }}
           file: ${{ env.PROJECT_NAME }}-${{ needs.generate-changelog.outputs.version }}-${{ matrix.build.target }}*
@@ -184,7 +185,7 @@ jobs:
 
       - name: Upload pre-release
         if: ${{ contains(github.ref, '-') }}
-        uses: svenstaro/upload-release-action@6b7fa9f267e90b50a19fef07b3596790bb941741 # 2.11.3
+        uses: svenstaro/upload-release-action@29e53e917877a24fad85510ded594ab3c9ca12de # 2.11.5
         with:
           repo_token: ${{ secrets.GITHUB_TOKEN }}
           file: ${{ env.PROJECT_NAME }}-${{ needs.generate-changelog.outputs.version }}-${{ matrix.build.target }}*
@@ -196,7 +197,7 @@ jobs:
 
 
       - name: Generate artifact attestation
-        uses: actions/attest-build-provenance@96278af6caaf10aea03fd8d33a09a777ca52d62f # v3.2.0
+        uses: actions/attest-build-provenance@a2bbfa25375fe432b6a289bc6b6cd05ecd0c4c32 # v4.1.0
         with:
           subject-path: ${{ env.PROJECT_NAME }}-${{ needs.generate-changelog.outputs.version }}-${{ matrix.build.target }}*
 
@@ -204,8 +205,11 @@ jobs:
   publish-crates-io:
     name: Publish to crates.io
     if: ${{ !contains(github.ref, '-') && vars.CRATES_IO_ENABLED == 'true' }}
-    needs: generate-changelog
+    needs: [generate-changelog, publish-binaries]
     runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
     steps:
       - name: Checkout
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -223,6 +227,9 @@ jobs:
     if: ${{ !contains(github.ref, '-') && vars.HOMEBREW_ENABLED == 'true' }}
     needs: [generate-changelog, publish-binaries]
     runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
     env:
       VERSION: ${{ needs.generate-changelog.outputs.version }}
     steps:
@@ -236,6 +243,12 @@ jobs:
             --dir checksums \
             --repo "${{ github.repository }}"
 
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          sparse-checkout: .github/formula.rb.tmpl
+          sparse-checkout-cone-mode: false
+
       - name: Generate formula
         run: |
           get_sha() {
@@ -243,54 +256,17 @@ jobs:
             awk '{print $1}' "checksums/${PROJECT_NAME}-${VERSION}-${target}.tar.gz.sha256"
           }
 
-          SHA_DARWIN_ARM64=$(get_sha "aarch64-apple-darwin")
-          SHA_DARWIN_X64=$(get_sha "x86_64-apple-darwin")
-          SHA_LINUX_ARM64=$(get_sha "aarch64-unknown-linux-gnu")
-          SHA_LINUX_X64=$(get_sha "x86_64-unknown-linux-gnu")
+          RELEASE_URL="https://github.com/${{ github.repository }}/releases/download/v${VERSION}"
 
-          cat > formula.rb <<RUBY
-          # typed: true
-          # frozen_string_literal: true
-
-          class Scrat < Formula
-            desc "Release management tooling focused on sanity retention"
-            homepage "https://github.com/${{ github.repository }}"
-            version "${VERSION}"
-            license "Apache-2.0 OR MIT"
-
-            on_macos do
-              if Hardware::CPU.arm?
-                url "https://github.com/${{ github.repository }}/releases/download/v#{version}/${PROJECT_NAME}-#{version}-aarch64-apple-darwin.tar.gz"
-                sha256 "${SHA_DARWIN_ARM64}"
-              else
-                url "https://github.com/${{ github.repository }}/releases/download/v#{version}/${PROJECT_NAME}-#{version}-x86_64-apple-darwin.tar.gz"
-                sha256 "${SHA_DARWIN_X64}"
-              end
-            end
-
-            on_linux do
-              if Hardware::CPU.arm?
-                url "https://github.com/${{ github.repository }}/releases/download/v#{version}/${PROJECT_NAME}-#{version}-aarch64-unknown-linux-gnu.tar.gz"
-                sha256 "${SHA_LINUX_ARM64}"
-              else
-                url "https://github.com/${{ github.repository }}/releases/download/v#{version}/${PROJECT_NAME}-#{version}-x86_64-unknown-linux-gnu.tar.gz"
-                sha256 "${SHA_LINUX_X64}"
-              end
-            end
-
-            def install
-              bin.install "bin/${PROJECT_NAME}"
-              man1.install Dir["share/man/man1/*.1"]
-              bash_completion.install "share/completions/${PROJECT_NAME}.bash" => "${PROJECT_NAME}"
-              zsh_completion.install "share/completions/_${PROJECT_NAME}"
-              fish_completion.install "share/completions/${PROJECT_NAME}.fish"
-            end
-
-            test do
-              assert_match version.to_s, shell_output("\#{bin}/${PROJECT_NAME} --version-only")
-            end
-          end
-          RUBY
+          sed \
+            -e "s|__HOMEPAGE__|https://github.com/${{ github.repository }}|" \
+            -e "s|__VERSION__|${VERSION}|" \
+            -e "s|__RELEASE_URL__|${RELEASE_URL}|g" \
+            -e "s|__SHA_DARWIN_ARM64__|$(get_sha aarch64-apple-darwin)|" \
+            -e "s|__SHA_DARWIN_X64__|$(get_sha x86_64-apple-darwin)|" \
+            -e "s|__SHA_LINUX_ARM64__|$(get_sha aarch64-unknown-linux-gnu)|" \
+            -e "s|__SHA_LINUX_X64__|$(get_sha x86_64-unknown-linux-gnu)|" \
+            .github/formula.rb.tmpl > formula.rb
 
           echo "Generated formula:"
           cat formula.rb
@@ -321,8 +297,11 @@ jobs:
   publish-deb:
     name: Publish Debian package
     if: vars.DEB_ENABLED == 'true'
-    needs: generate-changelog
+    needs: [generate-changelog, publish-binaries]
     runs-on: ubuntu-22.04
+    timeout-minutes: 30
+    permissions:
+      contents: write
     steps:
       - name: Checkout
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -353,10 +332,11 @@ jobs:
           echo "${{ secrets.GPG_RELEASE_KEY }}" | base64 --decode > private.key
           echo "${{ secrets.GPG_PASSPHRASE }}" | gpg --pinentry-mode=loopback --passphrase-fd 0 --import private.key
           echo "${{ secrets.GPG_PASSPHRASE }}" | gpg --pinentry-mode=loopback --passphrase-fd 0 --detach-sign "${PROJECT_NAME}-${VERSION}.deb"
+          rm -f private.key
 
       - name: Upload release
         if: ${{ !contains(github.ref, '-') }}
-        uses: svenstaro/upload-release-action@6b7fa9f267e90b50a19fef07b3596790bb941741 # 2.11.3
+        uses: svenstaro/upload-release-action@29e53e917877a24fad85510ded594ab3c9ca12de # 2.11.5
         with:
           repo_token: ${{ secrets.GITHUB_TOKEN }}
           file: ${{ env.PROJECT_NAME }}-${{ needs.generate-changelog.outputs.version }}.deb*
@@ -368,7 +348,7 @@ jobs:
 
       - name: Upload pre-release
         if: ${{ contains(github.ref, '-') }}
-        uses: svenstaro/upload-release-action@6b7fa9f267e90b50a19fef07b3596790bb941741 # 2.11.3
+        uses: svenstaro/upload-release-action@29e53e917877a24fad85510ded594ab3c9ca12de # 2.11.5
         with:
           repo_token: ${{ secrets.GITHUB_TOKEN }}
           file: ${{ env.PROJECT_NAME }}-${{ needs.generate-changelog.outputs.version }}.deb*
@@ -381,8 +361,11 @@ jobs:
   publish-rpm:
     name: Publish RPM package
     if: vars.RPM_ENABLED == 'true'
-    needs: generate-changelog
+    needs: [generate-changelog, publish-binaries]
     runs-on: ubuntu-22.04
+    timeout-minutes: 30
+    permissions:
+      contents: write
     steps:
       - name: Checkout
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -413,10 +396,11 @@ jobs:
           echo "${{ secrets.GPG_RELEASE_KEY }}" | base64 --decode > private.key
           echo "${{ secrets.GPG_PASSPHRASE }}" | gpg --pinentry-mode=loopback --passphrase-fd 0 --import private.key
           echo "${{ secrets.GPG_PASSPHRASE }}" | gpg --pinentry-mode=loopback --passphrase-fd 0 --detach-sign "${PROJECT_NAME}-${VERSION}.x86_64.rpm"
+          rm -f private.key
 
       - name: Upload release
         if: ${{ !contains(github.ref, '-') }}
-        uses: svenstaro/upload-release-action@6b7fa9f267e90b50a19fef07b3596790bb941741 # 2.11.3
+        uses: svenstaro/upload-release-action@29e53e917877a24fad85510ded594ab3c9ca12de # 2.11.5
         with:
           repo_token: ${{ secrets.GITHUB_TOKEN }}
           file: ${{ env.PROJECT_NAME }}-${{ needs.generate-changelog.outputs.version }}.x86_64.rpm*
@@ -428,7 +412,7 @@ jobs:
 
       - name: Upload pre-release
         if: ${{ contains(github.ref, '-') }}
-        uses: svenstaro/upload-release-action@6b7fa9f267e90b50a19fef07b3596790bb941741 # 2.11.3
+        uses: svenstaro/upload-release-action@29e53e917877a24fad85510ded594ab3c9ca12de # 2.11.5
         with:
           repo_token: ${{ secrets.GITHUB_TOKEN }}
           file: ${{ env.PROJECT_NAME }}-${{ needs.generate-changelog.outputs.version }}.x86_64.rpm*
@@ -443,23 +427,22 @@ jobs:
     if: ${{ !contains(github.ref, '-') && vars.NPM_ENABLED == 'true' }}
     needs: [generate-changelog, publish-binaries]
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     permissions:
       contents: read
-      id-token: write # OIDC for npm trusted publishing
+      id-token: write # OIDC for npm provenance (after initial publish)
     env:
       VERSION: ${{ needs.generate-changelog.outputs.version }}
+      NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
     steps:
       - name: Checkout
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
 
       - name: Setup Node
-        uses: actions/setup-node@6044e13b5dc448c55e2357c09f80417699197238 # v6.2.0
+        uses: actions/setup-node@53b83947a5a98c8d113130e565377fae1a50d02f # v6.3.0
         with:
           node-version: 20
           registry-url: "https://registry.npmjs.org"
-
-      - name: Install npm with OIDC support
-        run: npm install -g npm@latest
 
       - name: Download release artifacts
         env:
@@ -571,9 +554,14 @@ jobs:
 
             echo "Publishing $(basename "$pkg_dir")..."
             cd "$pkg_dir"
-            if ! npm publish --provenance --access public; then
-              echo "::error::Failed to publish $(basename "$pkg_dir")"
-              failures=$((failures + 1))
+            # Try with provenance (OIDC) first; fall back to token-only
+            # for initial publish where OIDC isn't available yet
+            if ! npm publish --provenance --access public 2>/dev/null; then
+              echo "Provenance publish failed, retrying without provenance..."
+              if ! npm publish --access public; then
+                echo "::error::Failed to publish $(basename "$pkg_dir")"
+                failures=$((failures + 1))
+              fi
             fi
             cd - > /dev/null
           done
@@ -585,5 +573,9 @@ jobs:
       - name: Publish main package
         run: |
           cd "npm/${PROJECT_NAME}"
-          npm publish --provenance --access public
+          # Try with provenance (OIDC) first; fall back to token-only
+          if ! npm publish --provenance --access public 2>/dev/null; then
+            echo "Provenance publish failed, retrying without provenance..."
+            npm publish --access public
+          fi
 

@@ -52,7 +52,6 @@ db-urls = ["https://github.com/RustSec/advisory-db"]
 
 # Ignore specific advisories (use with caution in enterprise)
 ignore = [
-
 ]
 
 # ==============================================================================
@@ -71,9 +70,6 @@ deny = []
 # Skip duplicate version checks for commonly duplicated crates and
 # transitive dependencies we can't control
 skip = [
-    # Proc-macro ecosystem - affects all presets
-    { crate = "syn", reason = "proc-macro ecosystem version churn" },
-
 ]
 
 # ==============================================================================

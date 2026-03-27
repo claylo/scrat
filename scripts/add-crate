@@ -1,0 +1,482 @@
+#!/usr/bin/env bash
+# add-crate - Add a new crate to the workspace
+#
+# Usage:
+#   add-crate                          # Interactive mode
+#   add-crate lib my-utils             # Library crate
+#   add-crate bin my-daemon            # Binary crate
+#   add-crate internal my-macros       # Internal support crate
+#   add-crate internal my-derive --derive  # Proc-macro crate
+#
+# Options:
+#   -d, --description TEXT   Crate description (skips prompt)
+#   --derive                 Set up as proc-macro crate (internal type only)
+#   -h, --help               Show this help
+
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+
+# Colors
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[0;33m'
+BLUE='\033[0;34m'
+DIM='\033[2m'
+BOLD='\033[1m'
+NC='\033[0m'
+
+CRATE_TYPE=""
+CRATE_NAME=""
+CRATE_DESC=""
+PROC_MACRO=false
+
+usage() {
+    sed -n '/^# Usage:/,/^[^#]/{ /^#/s/^# *//p }' "$0"
+    exit 0
+}
+
+# Parse arguments
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        -h|--help) usage ;;
+        -d|--description) CRATE_DESC="$2"; shift 2 ;;
+        --derive) PROC_MACRO=true; shift ;;
+        lib|bin|internal)
+            if [[ -z "$CRATE_TYPE" ]]; then
+                CRATE_TYPE="$1"; shift
+            else
+                echo -e "${RED}Error: crate type already set to '$CRATE_TYPE'${NC}" >&2
+                exit 1
+            fi
+            ;;
+        -*)
+            echo -e "${RED}Unknown option: $1${NC}" >&2
+            usage
+            ;;
+        *)
+            if [[ -z "$CRATE_NAME" ]]; then
+                CRATE_NAME="$1"; shift
+            else
+                echo -e "${RED}Unexpected argument: $1${NC}" >&2
+                exit 1
+            fi
+            ;;
+    esac
+done
+
+# Validate --derive is only used with internal type
+if [[ "$PROC_MACRO" == true ]] && [[ -n "$CRATE_TYPE" ]] && [[ "$CRATE_TYPE" != "internal" ]]; then
+    echo -e "${RED}Error: --derive is only valid with internal crate type${NC}" >&2
+    exit 1
+fi
+
+# ============================================================================
+# Workspace discovery
+# ============================================================================
+
+# Find workspace root by looking for Cargo.toml with [workspace]
+find_workspace_root() {
+    local dir="$PROJECT_ROOT"
+    while [[ "$dir" != "/" ]]; do
+        if [[ -f "$dir/Cargo.toml" ]] && grep -q '^\[workspace\]' "$dir/Cargo.toml"; then
+            echo "$dir"
+            return 0
+        fi
+        dir="$(dirname "$dir")"
+    done
+    return 1
+}
+
+WORKSPACE_ROOT="$(find_workspace_root)" || {
+    echo -e "${RED}Error: not inside a Cargo workspace${NC}" >&2
+    exit 1
+}
+
+# Detect claylo-rs conventions
+CLAYLO_RS=false
+if [[ -f "$WORKSPACE_ROOT/.repo.yml" ]]; then
+    CLAYLO_RS=true
+fi
+
+# Determine crate parent directory
+if [[ "$CLAYLO_RS" == true ]] && [[ -d "$WORKSPACE_ROOT/crates" ]]; then
+    CRATE_PARENT="$WORKSPACE_ROOT/crates"
+else
+    # Generic: check workspace members for common patterns
+    CRATE_PARENT="$WORKSPACE_ROOT"
+    if grep -q '"crates/\*"' "$WORKSPACE_ROOT/Cargo.toml" 2>/dev/null; then
+        CRATE_PARENT="$WORKSPACE_ROOT/crates"
+    fi
+fi
+
+# Detect workspace inheritance support
+HAS_WORKSPACE_PACKAGE=false
+if grep -q '^\[workspace\.package\]' "$WORKSPACE_ROOT/Cargo.toml"; then
+    HAS_WORKSPACE_PACKAGE=true
+fi
+
+HAS_WORKSPACE_LINTS=false
+if grep -q '^\[workspace\.lints' "$WORKSPACE_ROOT/Cargo.toml"; then
+    HAS_WORKSPACE_LINTS=true
+fi
+
+# Read edition and MSRV from workspace Cargo.toml
+EDITION=""
+MSRV=""
+if [[ "$HAS_WORKSPACE_PACKAGE" == true ]]; then
+    EDITION=$(grep '^edition' "$WORKSPACE_ROOT/Cargo.toml" | head -1 | sed 's/.*= *"//;s/".*//')
+    MSRV=$(grep '^rust-version' "$WORKSPACE_ROOT/Cargo.toml" | head -1 | sed 's/.*= *"//;s/".*//')
+fi
+
+# Collect existing workspace member names for collision detection
+existing_crate_names() {
+    cargo metadata --no-deps --format-version 1 2>/dev/null \
+        | grep -o '"name":"[^"]*"' \
+        | sed 's/"name":"//;s/"//' \
+        || true
+}
+
+EXISTING_CRATES="$(existing_crate_names)"
+
+# ============================================================================
+# Validation
+# ============================================================================
+
+# Rust keywords that can't be crate names
+RUST_KEYWORDS="as break const continue crate else enum extern false fn for if impl in let loop match mod move mut pub ref return self Self static struct super trait true type unsafe use where while async await dyn"
+
+validate_crate_name() {
+    local name="$1"
+
+    # Must be non-empty
+    if [[ -z "$name" ]]; then
+        echo "crate name cannot be empty"
+        return 1
+    fi
+
+    # Must be lowercase alphanumeric + hyphens
+    if [[ ! "$name" =~ ^[a-z][a-z0-9-]*$ ]]; then
+        echo "must start with lowercase letter, contain only lowercase letters, digits, and hyphens"
+        return 1
+    fi
+
+    # No trailing hyphen
+    if [[ "$name" == *- ]]; then
+        echo "must not end with a hyphen"
+        return 1
+    fi
+
+    # No double hyphens
+    if [[ "$name" == *--* ]]; then
+        echo "must not contain consecutive hyphens"
+        return 1
+    fi
+
+    # Not a Rust keyword (check underscore form too)
+    local snake="${name//-/_}"
+    for kw in $RUST_KEYWORDS; do
+        if [[ "$snake" == "$kw" ]]; then
+            echo "'$name' conflicts with Rust keyword '$kw'"
+            return 1
+        fi
+    done
+
+    # Not already in workspace
+    if echo "$EXISTING_CRATES" | grep -qx "$name"; then
+        echo "crate '$name' already exists in the workspace"
+        return 1
+    fi
+
+    # Directory doesn't already exist
+    if [[ -d "$CRATE_PARENT/$name" ]]; then
+        echo "directory '$CRATE_PARENT/$name' already exists"
+        return 1
+    fi
+
+    return 0
+}
+
+# ============================================================================
+# Interactive prompts
+# ============================================================================
+
+prompt_crate_type() {
+    if [[ ! -t 0 ]]; then
+        echo "Error: crate type is required in non-interactive mode (use: lib, bin, or internal)" >&2
+        exit 1
+    fi
+    echo ""
+    echo -e "${BOLD}Crate type:${NC}"
+    echo "  1) lib       - Reusable library"
+    echo "  2) bin       - Binary / CLI / daemon"
+    echo "  3) internal  - Internal support (macros, proto, etc.)"
+    echo ""
+    read -rp "Choose [1-3]: " choice
+    case "$choice" in
+        1|lib)      CRATE_TYPE="lib" ;;
+        2|bin)      CRATE_TYPE="bin" ;;
+        3|internal) CRATE_TYPE="internal" ;;
+        *) echo -e "${RED}Invalid choice${NC}" >&2; exit 1 ;;
+    esac
+}
+
+prompt_crate_name() {
+    if [[ ! -t 0 ]]; then
+        echo "Error: crate name is required in non-interactive mode" >&2
+        exit 1
+    fi
+    while true; do
+        echo ""
+        read -rp "Crate name (kebab-case): " CRATE_NAME
+        local err
+        if err=$(validate_crate_name "$CRATE_NAME"); then
+            break
+        else
+            echo -e "${RED}Invalid: $err${NC}" >&2
+        fi
+    done
+}
+
+prompt_description() {
+    if [[ ! -t 0 ]]; then
+        # Default based on type in non-interactive mode
+        case "$CRATE_TYPE" in
+            lib)      CRATE_DESC="Library crate" ;;
+            bin)      CRATE_DESC="Binary crate" ;;
+            internal) CRATE_DESC="Internal support crate" ;;
+        esac
+        return 0
+    fi
+    echo ""
+    read -rp "Brief description: " CRATE_DESC
+    if [[ -z "$CRATE_DESC" ]]; then
+        # Default based on type
+        case "$CRATE_TYPE" in
+            lib)      CRATE_DESC="Library crate" ;;
+            bin)      CRATE_DESC="Binary crate" ;;
+            internal) CRATE_DESC="Internal support crate" ;;
+        esac
+    fi
+}
+
+prompt_derive() {
+    if [[ "$CRATE_TYPE" == "internal" ]] && [[ "$PROC_MACRO" == false ]]; then
+        # Non-interactive: default to no proc-macro
+        [[ ! -t 0 ]] && return 0
+        echo ""
+        read -rp "Set up as proc-macro crate? [y/N]: " yn
+        case "$yn" in
+            [Yy]*) PROC_MACRO=true ;;
+        esac
+    fi
+}
+
+# Run prompts for missing values
+if [[ -z "$CRATE_TYPE" ]]; then
+    prompt_crate_type
+fi
+
+if [[ -z "$CRATE_NAME" ]]; then
+    prompt_crate_name
+else
+    # Validate provided name
+    err=$(validate_crate_name "$CRATE_NAME") || {
+        echo -e "${RED}Invalid crate name: $err${NC}" >&2
+        exit 1
+    }
+fi
+
+if [[ -z "$CRATE_DESC" ]]; then
+    prompt_description
+fi
+
+if [[ "$CRATE_TYPE" == "internal" ]]; then
+    prompt_derive
+fi
+
+# Derive crate name in snake_case for Rust identifiers
+CRATE_SNAKE="${CRATE_NAME//-/_}"
+
+# ============================================================================
+# File generation
+# ============================================================================
+
+CRATE_DIR="$CRATE_PARENT/$CRATE_NAME"
+
+generate_cargo_toml() {
+    local toml="$CRATE_DIR/Cargo.toml"
+
+    if [[ "$HAS_WORKSPACE_PACKAGE" == true ]]; then
+        cat > "$toml" <<EOF
+[package]
+name = "$CRATE_NAME"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "$CRATE_DESC"
+publish = false
+EOF
+    else
+        cat > "$toml" <<EOF
+[package]
+name = "$CRATE_NAME"
+version = "0.1.0"
+edition = "${EDITION:-2024}"
+${MSRV:+rust-version = \"$MSRV\"}
+description = "$CRATE_DESC"
+publish = false
+EOF
+    fi
+
+    # Proc-macro flag
+    if [[ "$PROC_MACRO" == true ]]; then
+        cat >> "$toml" <<'EOF'
+
+[lib]
+proc-macro = true
+EOF
+    fi
+
+    # Dependencies section
+    echo "" >> "$toml"
+    echo "[dependencies]" >> "$toml"
+
+    # Add conventional deps for claylo-rs projects
+    if [[ "$CLAYLO_RS" == true ]]; then
+        case "$CRATE_TYPE" in
+            lib|internal)
+                echo 'thiserror = "2.0"' >> "$toml"
+                ;;
+            bin)
+                echo 'anyhow = "1.0"' >> "$toml"
+                echo 'clap = { version = "4.5", features = ["derive"] }' >> "$toml"
+                ;;
+        esac
+    fi
+
+    # Lints
+    if [[ "$HAS_WORKSPACE_LINTS" == true ]]; then
+        echo "" >> "$toml"
+        cat >> "$toml" <<'EOF'
+[lints]
+workspace = true
+EOF
+    fi
+}
+
+generate_src_files() {
+    local src_dir="$CRATE_DIR/src"
+
+    case "$CRATE_TYPE" in
+        lib|internal)
+            cat > "$src_dir/lib.rs" <<EOF
+//! $CRATE_NAME — $CRATE_DESC
+EOF
+            ;;
+        bin)
+            if [[ "$CLAYLO_RS" == true ]]; then
+                cat > "$src_dir/main.rs" <<'EOF'
+use std::process::ExitCode;
+
+fn run() -> anyhow::Result<()> {
+    Ok(())
+}
+
+fn main() -> ExitCode {
+    match run() {
+        Ok(()) => ExitCode::SUCCESS,
+        Err(e) => {
+            eprintln!("Error: {e:?}");
+            ExitCode::FAILURE
+        }
+    }
+}
+EOF
+            else
+                cat > "$src_dir/main.rs" <<'EOF'
+fn main() {
+    println!("Hello from new crate!");
+}
+EOF
+            fi
+            ;;
+    esac
+}
+
+# Create directory structure
+mkdir -p "$CRATE_DIR/src"
+
+# Generate files
+generate_cargo_toml
+generate_src_files
+
+# ============================================================================
+# Workspace integration
+# ============================================================================
+
+# Check if workspace auto-discovers this crate
+workspace_auto_discovers() {
+    local rel_path="${CRATE_DIR#"$WORKSPACE_ROOT/"}"
+    # Check for glob patterns in members that would match
+    if grep -q '"crates/\*"' "$WORKSPACE_ROOT/Cargo.toml" 2>/dev/null; then
+        if [[ "$rel_path" == crates/* ]]; then
+            return 0
+        fi
+    fi
+    # Check for exact match
+    if grep -q "\"$rel_path\"" "$WORKSPACE_ROOT/Cargo.toml" 2>/dev/null; then
+        return 0
+    fi
+    return 1
+}
+
+# Add to workspace members if needed
+NEEDS_MEMBER_ADD=false
+if ! workspace_auto_discovers; then
+    NEEDS_MEMBER_ADD=true
+    rel_path="${CRATE_DIR#"$WORKSPACE_ROOT/"}"
+    # Add to members array in workspace Cargo.toml
+    # Find the members line and append
+    if grep -q '^members' "$WORKSPACE_ROOT/Cargo.toml"; then
+        # Insert before the closing bracket
+        sed -i.bak "s|^\(members = \[.*\)\]|\1, \"$rel_path\"]|" "$WORKSPACE_ROOT/Cargo.toml"
+        rm -f "$WORKSPACE_ROOT/Cargo.toml.bak"
+    fi
+fi
+
+# ============================================================================
+# Validation & output
+# ============================================================================
+
+echo ""
+echo -e "${GREEN}Created ${CRATE_TYPE} crate '${CRATE_NAME}' at ${CRATE_DIR#"$WORKSPACE_ROOT/"}/${NC}"
+
+if [[ "$NEEDS_MEMBER_ADD" == true ]]; then
+    echo -e "  ${GREEN}✓${NC} Added to workspace members in Cargo.toml"
+else
+    echo -e "  ${GREEN}✓${NC} Workspace auto-discovers crates/* — no Cargo.toml changes needed"
+fi
+
+if [[ "$CLAYLO_RS" == true ]]; then
+    echo -e "  ${GREEN}✓${NC} Applied claylo-rs conventions (workspace inheritance, lints)"
+fi
+
+# Validate with cargo check
+echo ""
+echo -e "${DIM}Running cargo check -p $CRATE_NAME...${NC}"
+if cargo check -p "$CRATE_NAME" --quiet 2>&1; then
+    echo -e "  ${GREEN}✓${NC} cargo check passed"
+else
+    echo -e "  ${YELLOW}⚠${NC}  cargo check failed — review generated files"
+fi
+
+echo ""
+echo "Next steps:"
+echo "  • Add dependencies: cargo add -p $CRATE_NAME <dep>"
+if [[ "$CRATE_TYPE" == "lib" || "$CRATE_TYPE" == "internal" ]]; then
+    echo "  • Use from another crate: cargo add -p <consumer> --path ${CRATE_DIR#"$WORKSPACE_ROOT/"}"
+fi
+echo ""

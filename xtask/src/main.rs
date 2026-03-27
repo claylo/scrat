@@ -44,6 +44,7 @@ fn main() -> Result<(), String> {
     }
 }
 
+/// Returns the workspace root directory (parent of xtask's `CARGO_MANIFEST_DIR`).
 pub fn workspace_root() -> PathBuf {
     let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     manifest_dir.parent().unwrap_or(&manifest_dir).to_path_buf()

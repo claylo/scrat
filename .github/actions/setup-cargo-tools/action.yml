@@ -37,7 +37,7 @@ runs:
 
     - name: Cache cargo tools
       id: cache-cargo-tools
-      uses: actions/cache@v5
+      uses: actions/cache@668228422ae6a00e4ad889ee87cd7109ec5666a7 # v5.0.4
       with:
         path: ~/.cargo/bin
         # yamllint disable-line rule:line-length
@@ -50,7 +50,7 @@ runs:
 
     - name: Install cargo-binstall
       if: steps.cache-cargo-tools.outputs.cache-hit != 'true' && inputs.binstall-tools != ''
-      uses: cargo-bins/cargo-binstall@main
+      uses: cargo-bins/cargo-binstall@113a77a4ce971c41332f2129c3d995df993cf746 # v1.17.8
 
     - name: Install tools via binstall
       if: steps.cache-cargo-tools.outputs.cache-hit != 'true' && inputs.binstall-tools != ''

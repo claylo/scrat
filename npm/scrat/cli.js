@@ -6,4 +6,9 @@ const child = spawn(getBinaryPath(), process.argv.slice(2), {
   stdio: "inherit",
 });
 
-child.on("close", (code) => process.exit(code ?? 0));
+child.on("close", (code, signal) => {
+  if (signal) {
+    process.kill(process.pid, signal);
+  }
+  process.exit(code ?? 1);
+});
