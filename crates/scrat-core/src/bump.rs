@@ -244,8 +244,8 @@ impl ReadyBump {
             Ecosystem::Node => {
                 return Err(BumpError::UnsupportedEcosystem(Ecosystem::Node));
             }
-            Ecosystem::Go => {
-                debug!("go ecosystem — version lives in git tags, no file to bump");
+            Ecosystem::Go | Ecosystem::Swift => {
+                debug!(%self.detection.ecosystem, "version lives in git tags, no file to bump");
             }
             Ecosystem::Php => {
                 if bump_composer_version(project_root, &self.next)? {
@@ -253,6 +253,16 @@ impl ReadyBump {
                 } else {
                     debug!("composer.json has no version field, skipping");
                 }
+            }
+            Ecosystem::Python => {
+                if bump_pyproject_version(project_root, &self.next)? {
+                    modified_files.push("pyproject.toml".into());
+                } else {
+                    debug!("pyproject.toml has no version field, skipping");
+                }
+            }
+            Ecosystem::Ruby => {
+                debug!("ruby version bump not yet supported — version lives in gemspec/version.rb");
             }
             Ecosystem::Generic => {
                 debug!("generic ecosystem — no project files to bump");
@@ -364,6 +374,53 @@ fn bump_composer_version(project_root: &Utf8Path, version: &Version) -> BumpResu
     })?;
 
     debug!(%version, "bumped composer.json version");
+    Ok(true)
+}
+
+/// Bump the version in `pyproject.toml` if it has a `version` field under `[project]`.
+///
+/// Returns `true` if the file was modified, `false` if no version field exists.
+fn bump_pyproject_version(project_root: &Utf8Path, version: &Version) -> BumpResult<bool> {
+    let pyproject_path = project_root.join("pyproject.toml");
+    let content = match std::fs::read_to_string(&pyproject_path) {
+        Ok(c) => c,
+        Err(_) => return Ok(false),
+    };
+
+    // Look for `version = "..."` under `[project]` section
+    let mut in_project = false;
+    let mut found = false;
+    let mut lines: Vec<String> = Vec::new();
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+        if trimmed.starts_with('[') {
+            in_project = trimmed == "[project]";
+        }
+        if in_project
+            && trimmed.starts_with("version")
+            && let Some((key, _)) = trimmed.split_once('=')
+            && key.trim() == "version"
+        {
+            lines.push(format!("version = \"{version}\""));
+            found = true;
+        } else {
+            lines.push(line.to_string());
+        }
+    }
+
+    if !found {
+        return Ok(false);
+    }
+
+    std::fs::write(&pyproject_path, lines.join("\n") + "\n").map_err(|e| {
+        BumpError::ToolFailed {
+            tool: "pyproject.toml".into(),
+            message: format!("failed to write: {e}"),
+        }
+    })?;
+
+    debug!(%version, "bumped pyproject.toml version");
     Ok(true)
 }
 

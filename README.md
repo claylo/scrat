@@ -116,9 +116,9 @@ Three strategies, auto-detected:
 | **Interactive** | Fallback | Shows recent commits, offers version candidates, you pick |
 
 scrat reads the current version from your project files
-(`Cargo.toml`, `package.json`)
+(`Cargo.toml`, `package.json`, `composer.json`, `pyproject.toml`)
 and computes candidates from there.
-Go and PHP projects don't have a standard version file, so they use the
+Go, Swift, and Ruby don't have a standard version file, so they use the
 interactive or explicit strategy.
 
 ### 3. Test
@@ -132,6 +132,9 @@ The command is auto-detected per ecosystem:
 | Node | `package.json` | `npm test` |
 | Go | `go.mod` | `go test ./...` |
 | PHP | `composer.json` | `composer test` |
+| Python | `pyproject.toml` | `pytest` |
+| Ruby | `Gemfile` | `bundle exec rake test` |
+| Swift | `Package.swift` | `swift test` |
 | Generic | (manual selection) | (none — set `commands.test`) |
 
 Override with `commands.test` in config.
@@ -142,8 +145,10 @@ Skip with `--no-test`.
 Updates version numbers in project files and generates the changelog.
 
 - Writes the new version to `Cargo.toml` (Rust), `package.json` (Node),
-  or `composer.json` (PHP, only if a `"version"` field already exists)
-- Go skips version-file rewrite (version lives in the git tag)
+  `composer.json` (PHP), or `pyproject.toml` (Python) — only if
+  a version field already exists in the file
+- Go, Swift, and Ruby skip version-file rewrite (version lives in git tags
+  or ecosystem-specific files like `version.rb`)
 - Runs `git-cliff` to update `CHANGELOG.md`
 - Reports which files were modified
 
@@ -159,7 +164,10 @@ Auto-detected:
 |-----------|----------------|
 | Rust | `cargo publish` |
 | Node | `npm publish` |
+| Python | `twine upload dist/*` |
+| Ruby | `gem push` |
 | Go | (none — Go modules publish via `git push`) |
+| Swift | (none — Swift packages distribute via git URLs) |
 | PHP | (none — set `commands.publish` if needed) |
 
 Skip with `--no-publish`.
@@ -172,8 +180,11 @@ Diffs lockfiles between the previous tag and HEAD to find what changed.
 | Ecosystem | Lockfile | Parser |
 |-----------|----------|--------|
 | Rust | `Cargo.lock` | State machine over `[[package]]` blocks |
+| Python | `uv.lock` | Same as Cargo.lock (identical TOML `[[package]]` format) |
 | Go | `go.mod` | Line-oriented collect-and-merge (not `go.sum` — cleaner, no checksums) |
 | PHP | `composer.lock` | State machine over JSON `"name"`/`"version"` pairs |
+| Ruby | `Gemfile.lock` | Collect-and-merge on 4-space-indent gem lines |
+| Swift | `Package.resolved` | JSON state machine on `"identity"`/`"version"` |
 | Node | `package-lock.json` | (stub — returns empty, full parser planned) |
 | Generic | (none) | Skipped |
 
@@ -338,7 +349,7 @@ log_level = "info"
 # log_dir = "/var/log/scrat"
 
 [project]
-# Override detected ecosystem: rust, node, go, php, generic
+# Override detected ecosystem: rust, node, go, php, python, ruby, swift, generic
 # type = "rust"
 # Override release branch (default: auto-detect main/master)
 # release_branch = "main"

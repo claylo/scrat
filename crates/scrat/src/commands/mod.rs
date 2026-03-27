@@ -27,10 +27,7 @@ pub fn prompt_ecosystem_selection() -> anyhow::Result<Ecosystem> {
         "\n{}",
         "Could not auto-detect project type.".yellow().bold()
     );
-    println!(
-        "{}",
-        "No Cargo.toml, package.json, go.mod, or composer.json found.".dimmed()
-    );
+    println!("{}", "No recognized marker file found.".dimmed());
     println!();
 
     let options = vec![
@@ -39,6 +36,9 @@ pub fn prompt_ecosystem_selection() -> anyhow::Result<Ecosystem> {
         "Node".to_string(),
         "Go".to_string(),
         "PHP".to_string(),
+        "Python".to_string(),
+        "Ruby".to_string(),
+        "Swift".to_string(),
         "Exit".to_string(),
     ];
 
@@ -53,6 +53,9 @@ pub fn prompt_ecosystem_selection() -> anyhow::Result<Ecosystem> {
         "Node" => Ok(Ecosystem::Node),
         "Go" => Ok(Ecosystem::Go),
         "PHP" => Ok(Ecosystem::Php),
+        "Python" => Ok(Ecosystem::Python),
+        "Ruby" => Ok(Ecosystem::Ruby),
+        "Swift" => Ok(Ecosystem::Swift),
         "Exit" => {
             println!("{}", "Cancelled.".yellow());
             std::process::exit(0);

@@ -9,6 +9,9 @@
 //! - **go.mod** (Go) — full parser (line-oriented collect-and-merge)
 //! - **composer.lock** (PHP) — full parser (JSON state machine)
 //! - **package-lock.json** (Node) — stub, returns empty
+//! - **uv.lock** (Python) — delegates to Cargo.lock parser (identical TOML format)
+//! - **Gemfile.lock** (Ruby) — collect-and-merge on 4-space-indent gem lines
+//! - **Package.resolved** (Swift) — JSON state machine on `"identity"`/`"version"`
 
 use tracing::{debug, warn};
 
@@ -44,6 +47,9 @@ pub fn compute_deps(ecosystem: Ecosystem, previous_tag: &str) -> Vec<DepChange> 
         Ecosystem::Node => parse_package_lock_diff(&diff),
         Ecosystem::Go => parse_go_mod_diff(&diff),
         Ecosystem::Php => parse_composer_lock_diff(&diff),
+        Ecosystem::Python => parse_uv_lock_diff(&diff),
+        Ecosystem::Ruby => parse_gemfile_lock_diff(&diff),
+        Ecosystem::Swift => parse_package_resolved_diff(&diff),
         Ecosystem::Generic => Vec::new(),
     };
 
@@ -161,6 +167,140 @@ fn extract_toml_string_value(line: &str, key: &str) -> Option<String> {
 /// Stub — returns empty for now. Full implementation deferred.
 const fn parse_package_lock_diff(_diff: &str) -> Vec<DepChange> {
     Vec::new()
+}
+
+/// Parse a unified diff of `uv.lock` into dependency changes.
+///
+/// `uv.lock` uses TOML with `[[package]]` blocks — structurally identical
+/// to `Cargo.lock`. Delegates directly to the Cargo.lock parser.
+fn parse_uv_lock_diff(diff: &str) -> Vec<DepChange> {
+    parse_cargo_lock_diff(diff)
+}
+
+/// Parse a unified diff of `Gemfile.lock` into dependency changes.
+///
+/// Line-oriented collect-and-merge. Only matches lines with exactly 4 spaces
+/// of indent (top-level gems under `specs:`), ignoring sub-dependency lines
+/// at 6+ spaces.
+fn parse_gemfile_lock_diff(diff: &str) -> Vec<DepChange> {
+    use std::collections::HashMap;
+
+    let mut removed: HashMap<String, String> = HashMap::new();
+    let mut added: HashMap<String, String> = HashMap::new();
+
+    for line in diff.lines() {
+        let (is_remove, is_add) = (line.starts_with('-'), line.starts_with('+'));
+        if !is_remove && !is_add {
+            continue;
+        }
+
+        let content = &line[1..];
+
+        // Skip diff headers
+        if content.starts_with("++") || content.starts_with("--") {
+            continue;
+        }
+
+        // Must be exactly 4 spaces indent (top-level gem, not a sub-dep at 6+)
+        if !content.starts_with("    ") || content.starts_with("      ") {
+            continue;
+        }
+
+        let trimmed = content.trim();
+
+        // Parse "gem-name (1.2.3)" or "gem-name (1.2.3.alpha)"
+        if let Some((name, rest)) = trimmed.split_once(" (")
+            && let Some(version) = rest.strip_suffix(')')
+        {
+            if is_remove {
+                removed.insert(name.to_string(), version.to_string());
+            } else {
+                added.insert(name.to_string(), version.to_string());
+            }
+        }
+    }
+
+    let mut changes: Vec<DepChange> = Vec::new();
+
+    for (name, old_ver) in &removed {
+        if let Some(new_ver) = added.get(name) {
+            if old_ver != new_ver {
+                changes.push(DepChange {
+                    name: name.clone(),
+                    from: Some(old_ver.clone()),
+                    to: Some(new_ver.clone()),
+                });
+            }
+        } else {
+            changes.push(DepChange {
+                name: name.clone(),
+                from: Some(old_ver.clone()),
+                to: None,
+            });
+        }
+    }
+
+    for (name, new_ver) in &added {
+        if !removed.contains_key(name) {
+            changes.push(DepChange {
+                name: name.clone(),
+                from: None,
+                to: Some(new_ver.clone()),
+            });
+        }
+    }
+
+    changes.sort_by(|a, b| a.name.cmp(&b.name));
+    changes
+}
+
+/// Parse a unified diff of `Package.resolved` (Swift) into dependency changes.
+///
+/// JSON state machine keyed on `"identity":` boundaries, same pattern as
+/// composer.lock but using `"identity"` instead of `"name"`.
+fn parse_package_resolved_diff(diff: &str) -> Vec<DepChange> {
+    let mut changes: Vec<DepChange> = Vec::new();
+
+    let mut current_name: Option<String> = None;
+    let mut old_version: Option<String> = None;
+    let mut new_version: Option<String> = None;
+
+    for line in diff.lines() {
+        let trimmed = line
+            .strip_prefix(' ')
+            .or_else(|| line.strip_prefix('+'))
+            .or_else(|| line.strip_prefix('-'))
+            .unwrap_or(line)
+            .trim();
+
+        // "identity": boundary — emit pending, start new tracking
+        if let Some(name) = extract_json_string_value(trimmed, "identity") {
+            emit_change(&mut changes, &current_name, &old_version, &new_version);
+            current_name = Some(name);
+            old_version = None;
+            new_version = None;
+            continue;
+        }
+
+        // -"version": — old version
+        if line.starts_with('-') {
+            if let Some(ver) = extract_json_string_value(trimmed, "version") {
+                old_version = Some(ver);
+            }
+            continue;
+        }
+
+        // +"version": — new version
+        if line.starts_with('+')
+            && let Some(ver) = extract_json_string_value(trimmed, "version")
+        {
+            new_version = Some(ver);
+        }
+    }
+
+    emit_change(&mut changes, &current_name, &old_version, &new_version);
+    changes.sort_by(|a, b| a.name.cmp(&b.name));
+    changes
 }
 
 /// Parse a unified diff of `go.mod` into dependency changes.
@@ -683,5 +823,231 @@ mod tests {
             None
         );
         assert_eq!(extract_json_string_value("not a json line", "name"), None);
+    }
+
+    // ── uv.lock (Python) parser ─────────────────────────────────────
+
+    #[test]
+    fn parse_uv_lock_diff_update() {
+        // Identical to Cargo.lock format
+        let diff = r#"
+ [[package]]
+ name = "requests"
+-version = "2.31.0"
++version = "2.32.0"
+ source = { registry = "https://pypi.org/simple" }
+"#;
+        let changes = parse_uv_lock_diff(diff);
+        assert_eq!(changes.len(), 1);
+        assert_eq!(changes[0].name, "requests");
+        assert_eq!(changes[0].from.as_deref(), Some("2.31.0"));
+        assert_eq!(changes[0].to.as_deref(), Some("2.32.0"));
+    }
+
+    #[test]
+    fn parse_uv_lock_diff_added() {
+        let diff = r#"
++[[package]]
++name = "new-dep"
++version = "1.0.0"
+"#;
+        let changes = parse_uv_lock_diff(diff);
+        assert_eq!(changes.len(), 1);
+        assert_eq!(changes[0].from, None);
+        assert_eq!(changes[0].to.as_deref(), Some("1.0.0"));
+    }
+
+    #[test]
+    fn parse_uv_lock_diff_skips_header() {
+        // uv.lock has file-level version/requires-python before [[package]]
+        let diff = r#"
+-version = 1
++version = 2
+ requires-python = ">=3.14"
+ [[package]]
+ name = "foo"
+-version = "1.0.0"
++version = "1.1.0"
+"#;
+        let changes = parse_uv_lock_diff(diff);
+        assert_eq!(changes.len(), 1);
+        assert_eq!(changes[0].name, "foo");
+    }
+
+    // ── Gemfile.lock (Ruby) parser ──────────────────────────────────
+
+    #[test]
+    fn parse_gemfile_lock_diff_update() {
+        let diff = "\
+-    rails (7.1.2)\n\
++    rails (7.1.3)";
+        let changes = parse_gemfile_lock_diff(diff);
+        assert_eq!(changes.len(), 1);
+        assert_eq!(changes[0].name, "rails");
+        assert_eq!(changes[0].from.as_deref(), Some("7.1.2"));
+        assert_eq!(changes[0].to.as_deref(), Some("7.1.3"));
+    }
+
+    #[test]
+    fn parse_gemfile_lock_diff_added() {
+        let diff = "+    new-gem (1.0.0)";
+        let changes = parse_gemfile_lock_diff(diff);
+        assert_eq!(changes.len(), 1);
+        assert_eq!(changes[0].name, "new-gem");
+        assert_eq!(changes[0].from, None);
+        assert_eq!(changes[0].to.as_deref(), Some("1.0.0"));
+    }
+
+    #[test]
+    fn parse_gemfile_lock_diff_removed() {
+        let diff = "-    old-gem (2.0.0)";
+        let changes = parse_gemfile_lock_diff(diff);
+        assert_eq!(changes.len(), 1);
+        assert_eq!(changes[0].from.as_deref(), Some("2.0.0"));
+        assert_eq!(changes[0].to, None);
+    }
+
+    #[test]
+    fn parse_gemfile_lock_diff_ignores_subdeps() {
+        // Sub-deps have 6+ spaces indent — must be ignored
+        let diff = "\
+-    rails (7.1.2)\n\
++    rails (7.1.3)\n\
+-      actionpack (= 7.1.2)\n\
++      actionpack (= 7.1.3)";
+        let changes = parse_gemfile_lock_diff(diff);
+        assert_eq!(changes.len(), 1);
+        assert_eq!(changes[0].name, "rails");
+    }
+
+    #[test]
+    fn parse_gemfile_lock_diff_mixed() {
+        let diff = "\
+-    rails (7.1.2)\n\
++    rails (7.1.3)\n\
++    new-gem (1.0.0)\n\
+-    old-gem (2.0.0)";
+        let changes = parse_gemfile_lock_diff(diff);
+        assert_eq!(changes.len(), 3);
+        assert_eq!(changes[0].name, "new-gem");
+        assert_eq!(changes[1].name, "old-gem");
+        assert_eq!(changes[2].name, "rails");
+    }
+
+    #[test]
+    fn parse_gemfile_lock_diff_empty() {
+        assert!(parse_gemfile_lock_diff("").is_empty());
+    }
+
+    #[test]
+    fn parse_gemfile_lock_diff_prerelease() {
+        let diff = "\
+-    nokogiri (1.16.0.rc1)\n\
++    nokogiri (1.16.0)";
+        let changes = parse_gemfile_lock_diff(diff);
+        assert_eq!(changes.len(), 1);
+        assert_eq!(changes[0].from.as_deref(), Some("1.16.0.rc1"));
+    }
+
+    // ── Package.resolved (Swift) parser ─────────────────────────────
+
+    #[test]
+    fn parse_package_resolved_diff_update() {
+        let diff = r#"
+       "identity" : "swift-nio",
+       "kind" : "remoteSourceControl",
+       "state" : {
+-        "version" : "2.92.0"
++        "version" : "2.92.1"
+       }
+"#;
+        let changes = parse_package_resolved_diff(diff);
+        assert_eq!(changes.len(), 1);
+        assert_eq!(changes[0].name, "swift-nio");
+        assert_eq!(changes[0].from.as_deref(), Some("2.92.0"));
+        assert_eq!(changes[0].to.as_deref(), Some("2.92.1"));
+    }
+
+    #[test]
+    fn parse_package_resolved_diff_added() {
+        let diff = r#"
++      "identity" : "swift-log",
++      "state" : {
++        "version" : "1.5.4"
++      }
+"#;
+        let changes = parse_package_resolved_diff(diff);
+        assert_eq!(changes.len(), 1);
+        assert_eq!(changes[0].name, "swift-log");
+        assert_eq!(changes[0].from, None);
+        assert_eq!(changes[0].to.as_deref(), Some("1.5.4"));
+    }
+
+    #[test]
+    fn parse_package_resolved_diff_removed() {
+        let diff = r#"
+-      "identity" : "old-package",
+-      "state" : {
+-        "version" : "1.0.0"
+-      }
+"#;
+        let changes = parse_package_resolved_diff(diff);
+        assert_eq!(changes.len(), 1);
+        assert_eq!(changes[0].from.as_deref(), Some("1.0.0"));
+        assert_eq!(changes[0].to, None);
+    }
+
+    #[test]
+    fn parse_package_resolved_diff_ignores_revision() {
+        let diff = r#"
+       "identity" : "swift-nio",
+       "state" : {
+-        "revision" : "abc123",
+-        "version" : "2.92.0"
++        "revision" : "def456",
++        "version" : "2.92.1"
+       }
+"#;
+        let changes = parse_package_resolved_diff(diff);
+        assert_eq!(changes.len(), 1);
+        assert_eq!(changes[0].to.as_deref(), Some("2.92.1"));
+    }
+
+    #[test]
+    fn parse_package_resolved_diff_ignores_file_version() {
+        // File-level "version": 3 should not be emitted as a dep change
+        let diff = r#"
+-  "version" : 2
++  "version" : 3
+       "identity" : "swift-nio",
+-        "version" : "2.92.0"
++        "version" : "2.92.1"
+"#;
+        let changes = parse_package_resolved_diff(diff);
+        assert_eq!(changes.len(), 1);
+        assert_eq!(changes[0].name, "swift-nio");
+    }
+
+    #[test]
+    fn parse_package_resolved_diff_mixed() {
+        let diff = r#"
+       "identity" : "updated-pkg",
+-        "version" : "1.0.0"
++        "version" : "1.1.0"
++      "identity" : "new-pkg",
++        "version" : "0.1.0"
+-      "identity" : "old-pkg",
+-        "version" : "3.0.0"
+"#;
+        let changes = parse_package_resolved_diff(diff);
+        assert_eq!(changes.len(), 3);
+        assert_eq!(changes[0].name, "new-pkg");
+        assert_eq!(changes[1].name, "old-pkg");
+        assert_eq!(changes[2].name, "updated-pkg");
+    }
+
+    #[test]
+    fn parse_package_resolved_diff_empty() {
+        assert!(parse_package_resolved_diff("").is_empty());
     }
 }

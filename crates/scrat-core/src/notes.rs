@@ -221,6 +221,27 @@ fn detect_current_version(project_root: &Utf8Path, ecosystem: &str) -> Option<St
             let parsed: serde_json::Value = serde_json::from_str(&content).ok()?;
             parsed["version"].as_str().map(String::from)
         }
+        "python" => {
+            let pyproject = project_root.join("pyproject.toml");
+            let content = std::fs::read_to_string(&pyproject).ok()?;
+            let mut in_project = false;
+            for line in content.lines() {
+                let trimmed = line.trim();
+                if trimmed.starts_with('[') {
+                    in_project = trimmed == "[project]";
+                    continue;
+                }
+                if in_project
+                    && trimmed.starts_with("version")
+                    && let Some((key, val)) = trimmed.split_once('=')
+                    && key.trim() == "version"
+                {
+                    return Some(val.trim().trim_matches('"').to_string());
+                }
+            }
+            None
+        }
+        // Go, Ruby, Swift — version lives in git tags or gemspec
         _ => None,
     }
 }

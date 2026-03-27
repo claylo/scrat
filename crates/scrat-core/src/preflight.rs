@@ -345,6 +345,39 @@ mod tests {
                     changelog_tool: None,
                 },
             },
+            Ecosystem::Python => ProjectDetection {
+                ecosystem: Ecosystem::Python,
+                version_strategy: VersionStrategy::Interactive,
+                tools: DetectedTools {
+                    test_cmd: "pytest".into(),
+                    build_cmd: "python -m build".into(),
+                    publish_cmd: Some("twine upload dist/*".into()),
+                    bump_cmd: None,
+                    changelog_tool: None,
+                },
+            },
+            Ecosystem::Ruby => ProjectDetection {
+                ecosystem: Ecosystem::Ruby,
+                version_strategy: VersionStrategy::Interactive,
+                tools: DetectedTools {
+                    test_cmd: "bundle exec rake test".into(),
+                    build_cmd: "gem build".into(),
+                    publish_cmd: Some("gem push".into()),
+                    bump_cmd: None,
+                    changelog_tool: None,
+                },
+            },
+            Ecosystem::Swift => ProjectDetection {
+                ecosystem: Ecosystem::Swift,
+                version_strategy: VersionStrategy::Interactive,
+                tools: DetectedTools {
+                    test_cmd: "swift test".into(),
+                    build_cmd: "swift build -c release".into(),
+                    publish_cmd: None,
+                    bump_cmd: None,
+                    changelog_tool: None,
+                },
+            },
             Ecosystem::Generic => ProjectDetection::generic(VersionStrategy::Interactive),
         }
     }

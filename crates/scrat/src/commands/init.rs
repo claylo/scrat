@@ -260,6 +260,9 @@ fn prompt_ecosystem(plan: &init::InitPlan) -> anyhow::Result<Option<Ecosystem>> 
         "Node".to_string(),
         "Go".to_string(),
         "PHP".to_string(),
+        "Python".to_string(),
+        "Ruby".to_string(),
+        "Swift".to_string(),
         "Skip (omit from config)".to_string(),
     ];
 
@@ -274,6 +277,9 @@ fn prompt_ecosystem(plan: &init::InitPlan) -> anyhow::Result<Option<Ecosystem>> 
         "Node" => Ok(Some(Ecosystem::Node)),
         "Go" => Ok(Some(Ecosystem::Go)),
         "PHP" => Ok(Some(Ecosystem::Php)),
+        "Python" => Ok(Some(Ecosystem::Python)),
+        "Ruby" => Ok(Some(Ecosystem::Ruby)),
+        "Swift" => Ok(Some(Ecosystem::Swift)),
         s if s.starts_with("Skip") => Ok(None),
         _ => bail!("unexpected selection: {selection}"),
     }
