@@ -14,8 +14,8 @@ repository = "https://github.com/claylo/scrat"
 homepage = "https://github.com/claylo/scrat"
 documentation = "https://docs.rs/scrat"
 description = "Release management tooling focused on sanity retention"
-keywords = []
-categories = []
+keywords = ["release", "changelog", "versioning", "git-cliff", "deploy"]
+categories = ["development-tools", "command-line-utilities"]
 
 [workspace.lints.rust]
 # Use "deny" instead of "forbid" to allow benchmark harnesses to override
