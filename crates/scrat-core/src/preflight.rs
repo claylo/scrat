@@ -833,11 +833,16 @@ mod tests {
 
     #[test]
     fn check_release_branch_with_override_not_matching() {
-        // Use a branch name that definitely doesn't match current branch
+        // Use a branch name that definitely doesn't match current branch.
+        // In CI (detached HEAD), the message will be about detached HEAD
+        // rather than a branch mismatch — either way, it should fail.
         let result = check_release_branch(Some("this-branch-does-not-exist-xyz"));
         assert!(!result.passed);
-        assert!(result.message.contains("this-branch-does-not-exist-xyz"));
-        assert!(result.message.contains("expected"));
+        assert!(
+            result.message.contains("expected") || result.message.contains("Detached HEAD"),
+            "unexpected message: {}",
+            result.message
+        );
     }
 
     // ---------------------------------------------------------------
