@@ -441,6 +441,10 @@ mod tests {
         })
     }
 
+    // ──────────────────────────────────────────────
+    // build_extra: full context
+    // ──────────────────────────────────────────────
+
     #[test]
     fn build_extra_with_full_context() {
         let mut ctx = test_ctx();
@@ -499,6 +503,10 @@ mod tests {
         assert_eq!(obj["metadata"]["custom"], "value");
     }
 
+    // ──────────────────────────────────────────────
+    // build_extra: empty context
+    // ──────────────────────────────────────────────
+
     #[test]
     fn build_extra_with_empty_context() {
         let ctx = test_ctx();
@@ -510,6 +518,10 @@ mod tests {
         assert!(!obj.contains_key("deps"));
         assert!(!obj.contains_key("metadata"));
     }
+
+    // ──────────────────────────────────────────────
+    // build_extra: dep shapes (updated, added, removed)
+    // ──────────────────────────────────────────────
 
     #[test]
     fn build_extra_deps_shape() {
@@ -555,6 +567,10 @@ mod tests {
         assert!(deps[2]["to"].is_null());
     }
 
+    // ──────────────────────────────────────────────
+    // inject_extra: happy path
+    // ──────────────────────────────────────────────
+
     #[test]
     fn inject_extra_into_cliff_context() {
         let mut ctx = test_ctx();
@@ -589,6 +605,10 @@ mod tests {
         assert_eq!(release["extra"]["stats"]["contributors"][0]["name"], "Clay");
     }
 
+    // ──────────────────────────────────────────────
+    // inject_extra: error cases
+    // ──────────────────────────────────────────────
+
     #[test]
     fn inject_extra_errors_on_empty_array() {
         let ctx = test_ctx();
@@ -610,11 +630,19 @@ mod tests {
         assert!(result.unwrap_err().to_string().contains("not a JSON array"));
     }
 
+    // ──────────────────────────────────────────────
+    // Built-in template: basic content assertions
+    // ──────────────────────────────────────────────
+
     #[test]
     fn builtin_template_is_non_empty() {
         assert!(!BUILTIN_TEMPLATE.is_empty());
         assert!(BUILTIN_TEMPLATE.contains("version"));
     }
+
+    // ──────────────────────────────────────────────
+    // build_extra: partial contexts (stats-only, metadata-only)
+    // ──────────────────────────────────────────────
 
     #[test]
     fn build_extra_stats_only() {
@@ -647,5 +675,844 @@ mod tests {
         assert!(!obj.contains_key("deps"));
         assert!(obj.contains_key("metadata"));
         assert_eq!(obj["metadata"]["key"], "val");
+    }
+
+    // ──────────────────────────────────────────────
+    // build_extra: deps-only (no stats, no metadata)
+    // ──────────────────────────────────────────────
+
+    #[test]
+    fn build_extra_deps_only() {
+        let mut ctx = test_ctx();
+        ctx.dependencies = vec![DepChange {
+            name: "anyhow".into(),
+            from: Some("1.0.0".into()),
+            to: Some("1.0.86".into()),
+        }];
+
+        let extra = build_extra(&ctx);
+        let obj = extra.as_object().unwrap();
+        assert!(!obj.contains_key("stats"));
+        assert!(obj.contains_key("deps"));
+        assert!(!obj.contains_key("metadata"));
+        assert_eq!(obj["deps"].as_array().unwrap().len(), 1);
+    }
+
+    // ──────────────────────────────────────────────
+    // build_extra: stats with zero values
+    // ──────────────────────────────────────────────
+
+    #[test]
+    fn build_extra_stats_with_zeroes() {
+        let mut ctx = test_ctx();
+        ctx.stats = Some(ReleaseStats {
+            commit_count: 0,
+            files_changed: 0,
+            insertions: 0,
+            deletions: 0,
+            contributors: vec![],
+        });
+
+        let extra = build_extra(&ctx);
+        let stats = &extra["stats"];
+        assert_eq!(stats["commit_count"], 0);
+        assert_eq!(stats["files_changed"], 0);
+        assert_eq!(stats["insertions"], 0);
+        assert_eq!(stats["deletions"], 0);
+        assert_eq!(stats["contributors"].as_array().unwrap().len(), 0);
+    }
+
+    // ──────────────────────────────────────────────
+    // build_extra: metadata with complex values
+    // ──────────────────────────────────────────────
+
+    #[test]
+    fn build_extra_metadata_complex_values() {
+        let mut ctx = test_ctx();
+        ctx.metadata.insert(
+            "nested".into(),
+            serde_json::json!({
+                "a": 1,
+                "b": [2, 3],
+                "c": {"d": true}
+            }),
+        );
+        ctx.metadata.insert("number".into(), serde_json::json!(42));
+        ctx.metadata
+            .insert("null_val".into(), serde_json::Value::Null);
+        ctx.metadata
+            .insert("bool_val".into(), serde_json::json!(false));
+
+        let extra = build_extra(&ctx);
+        let meta = extra["metadata"].as_object().unwrap();
+
+        assert_eq!(meta["nested"]["a"], 1);
+        assert_eq!(meta["nested"]["b"][0], 2);
+        assert_eq!(meta["nested"]["c"]["d"], true);
+        assert_eq!(meta["number"], 42);
+        assert!(meta["null_val"].is_null());
+        assert_eq!(meta["bool_val"], false);
+    }
+
+    // ──────────────────────────────────────────────
+    // build_extra: multiple metadata keys
+    // ──────────────────────────────────────────────
+
+    #[test]
+    fn build_extra_metadata_multiple_keys() {
+        let mut ctx = test_ctx();
+        ctx.metadata
+            .insert("postcard".into(), serde_json::json!("img/card.png"));
+        ctx.metadata
+            .insert("quote".into(), serde_json::json!("Ship it!"));
+        ctx.metadata
+            .insert("custom_flag".into(), serde_json::json!(true));
+
+        let extra = build_extra(&ctx);
+        let meta = extra["metadata"].as_object().unwrap();
+        assert_eq!(meta.len(), 3);
+        assert_eq!(meta["postcard"], "img/card.png");
+        assert_eq!(meta["quote"], "Ship it!");
+        assert_eq!(meta["custom_flag"], true);
+    }
+
+    // ──────────────────────────────────────────────
+    // build_extra: stats serialization includes commit_count
+    // ──────────────────────────────────────────────
+
+    #[test]
+    fn build_extra_stats_includes_commit_count() {
+        let mut ctx = test_ctx();
+        ctx.stats = Some(ReleaseStats {
+            commit_count: 99,
+            files_changed: 7,
+            insertions: 200,
+            deletions: 50,
+            contributors: vec![Contributor {
+                name: "Dev".into(),
+                count: 99,
+            }],
+        });
+
+        let extra = build_extra(&ctx);
+        assert_eq!(extra["stats"]["commit_count"], 99);
+        assert_eq!(extra["stats"]["contributors"].as_array().unwrap().len(), 1);
+        assert_eq!(extra["stats"]["contributors"][0]["name"], "Dev");
+        assert_eq!(extra["stats"]["contributors"][0]["count"], 99);
+    }
+
+    // ──────────────────────────────────────────────
+    // build_extra: many deps preserves order
+    // ──────────────────────────────────────────────
+
+    #[test]
+    fn build_extra_deps_preserves_order() {
+        let mut ctx = test_ctx();
+        ctx.dependencies = vec![
+            DepChange {
+                name: "zzz".into(),
+                from: Some("1.0.0".into()),
+                to: Some("2.0.0".into()),
+            },
+            DepChange {
+                name: "aaa".into(),
+                from: None,
+                to: Some("0.1.0".into()),
+            },
+            DepChange {
+                name: "mmm".into(),
+                from: Some("3.0.0".into()),
+                to: None,
+            },
+        ];
+
+        let extra = build_extra(&ctx);
+        let deps = extra["deps"].as_array().unwrap();
+        // build_extra preserves input order (sorting is the deps module's job)
+        assert_eq!(deps[0]["name"], "zzz");
+        assert_eq!(deps[1]["name"], "aaa");
+        assert_eq!(deps[2]["name"], "mmm");
+    }
+
+    // ──────────────────────────────────────────────
+    // build_extra: JSON round-trip fidelity
+    // ──────────────────────────────────────────────
+
+    #[test]
+    fn build_extra_json_round_trip() {
+        let mut ctx = test_ctx();
+        ctx.stats = Some(ReleaseStats {
+            commit_count: 3,
+            files_changed: 2,
+            insertions: 10,
+            deletions: 5,
+            contributors: vec![Contributor {
+                name: "Tester".into(),
+                count: 3,
+            }],
+        });
+        ctx.dependencies = vec![DepChange {
+            name: "serde".into(),
+            from: Some("1.0.0".into()),
+            to: Some("1.1.0".into()),
+        }];
+        ctx.metadata
+            .insert("build_id".into(), serde_json::json!("abc-123"));
+
+        let extra = build_extra(&ctx);
+        let serialized = serde_json::to_string(&extra).unwrap();
+        let deserialized: serde_json::Value = serde_json::from_str(&serialized).unwrap();
+
+        // Round-trip should produce identical structure
+        assert_eq!(extra, deserialized);
+    }
+
+    // ──────────────────────────────────────────────
+    // inject_extra: malformed JSON input
+    // ──────────────────────────────────────────────
+
+    #[test]
+    fn inject_extra_errors_on_malformed_json() {
+        let ctx = test_ctx();
+        let result = inject_extra("this is not json", &ctx);
+        assert!(result.is_err());
+        let err_msg = result.unwrap_err().to_string();
+        assert!(
+            err_msg.contains("failed to parse context JSON"),
+            "unexpected error: {err_msg}"
+        );
+    }
+
+    #[test]
+    fn inject_extra_errors_on_truncated_json() {
+        let ctx = test_ctx();
+        let result = inject_extra("[{\"version\":", &ctx);
+        assert!(result.is_err());
+        let err_msg = result.unwrap_err().to_string();
+        assert!(
+            err_msg.contains("failed to parse context JSON"),
+            "unexpected error: {err_msg}"
+        );
+    }
+
+    #[test]
+    fn inject_extra_errors_on_json_string() {
+        let ctx = test_ctx();
+        // A JSON string is valid JSON but not an array
+        let result = inject_extra("\"hello\"", &ctx);
+        assert!(result.is_err());
+        let err_msg = result.unwrap_err().to_string();
+        assert!(
+            err_msg.contains("not a JSON array"),
+            "unexpected error: {err_msg}"
+        );
+    }
+
+    #[test]
+    fn inject_extra_errors_on_json_number() {
+        let ctx = test_ctx();
+        let result = inject_extra("42", &ctx);
+        assert!(result.is_err());
+        let err_msg = result.unwrap_err().to_string();
+        assert!(
+            err_msg.contains("not a JSON array"),
+            "unexpected error: {err_msg}"
+        );
+    }
+
+    #[test]
+    fn inject_extra_errors_on_json_null() {
+        let ctx = test_ctx();
+        let result = inject_extra("null", &ctx);
+        assert!(result.is_err());
+        let err_msg = result.unwrap_err().to_string();
+        assert!(
+            err_msg.contains("not a JSON array"),
+            "unexpected error: {err_msg}"
+        );
+    }
+
+    #[test]
+    fn inject_extra_errors_on_json_boolean() {
+        let ctx = test_ctx();
+        let result = inject_extra("true", &ctx);
+        assert!(result.is_err());
+        let err_msg = result.unwrap_err().to_string();
+        assert!(
+            err_msg.contains("not a JSON array"),
+            "unexpected error: {err_msg}"
+        );
+    }
+
+    // ──────────────────────────────────────────────
+    // inject_extra: preserves existing fields
+    // ──────────────────────────────────────────────
+
+    #[test]
+    fn inject_extra_preserves_existing_release_fields() {
+        let ctx = test_ctx();
+        let cliff_context = serde_json::json!([{
+            "version": "1.2.3",
+            "timestamp": "2026-03-27T00:00:00Z",
+            "commits": [
+                {"id": "abc1234", "message": "feat: something", "group": "Features"}
+            ],
+            "statistics": {"commit_count": 1},
+            "custom_field": "should survive"
+        }]);
+        let cliff_json = serde_json::to_string(&cliff_context).unwrap();
+
+        let result = inject_extra(&cliff_json, &ctx).unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(&result).unwrap();
+        let release = &parsed[0];
+
+        // Original fields preserved
+        assert_eq!(release["version"], "1.2.3");
+        assert_eq!(release["timestamp"], "2026-03-27T00:00:00Z");
+        assert_eq!(release["commits"].as_array().unwrap().len(), 1);
+        assert_eq!(release["statistics"]["commit_count"], 1);
+        assert_eq!(release["custom_field"], "should survive");
+
+        // extra injected (empty because ctx has no stats/deps/metadata)
+        assert!(release["extra"].is_object());
+    }
+
+    // ──────────────────────────────────────────────
+    // inject_extra: multiple releases — only first gets extra
+    // ──────────────────────────────────────────────
+
+    #[test]
+    fn inject_extra_only_modifies_first_release() {
+        let mut ctx = test_ctx();
+        ctx.metadata
+            .insert("marker".into(), serde_json::json!("injected"));
+
+        let cliff_context = serde_json::json!([
+            {"version": "1.2.3", "commits": []},
+            {"version": "1.1.0", "commits": []}
+        ]);
+        let cliff_json = serde_json::to_string(&cliff_context).unwrap();
+
+        let result = inject_extra(&cliff_json, &ctx).unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(&result).unwrap();
+
+        // First release has extra
+        assert!(parsed[0]["extra"].is_object());
+        assert_eq!(parsed[0]["extra"]["metadata"]["marker"], "injected");
+
+        // Second release does NOT have extra injected
+        assert!(parsed[1]["extra"].is_null());
+    }
+
+    // ──────────────────────────────────────────────
+    // inject_extra: overwrites pre-existing extra field
+    // ──────────────────────────────────────────────
+
+    #[test]
+    fn inject_extra_overwrites_existing_extra() {
+        let mut ctx = test_ctx();
+        ctx.metadata
+            .insert("from_scrat".into(), serde_json::json!(true));
+
+        let cliff_context = serde_json::json!([{
+            "version": "1.2.3",
+            "commits": [],
+            "extra": {"old_key": "old_value"}
+        }]);
+        let cliff_json = serde_json::to_string(&cliff_context).unwrap();
+
+        let result = inject_extra(&cliff_json, &ctx).unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(&result).unwrap();
+        let extra = &parsed[0]["extra"];
+
+        // Old extra is replaced
+        assert!(
+            extra["old_key"].is_null(),
+            "old extra should be overwritten"
+        );
+        // New extra is present
+        assert_eq!(extra["metadata"]["from_scrat"], true);
+    }
+
+    // ──────────────────────────────────────────────
+    // inject_extra: empty context (no stats/deps/metadata) still injects
+    // ──────────────────────────────────────────────
+
+    #[test]
+    fn inject_extra_injects_empty_extra_object() {
+        let ctx = test_ctx();
+        let cliff_context = serde_json::json!([{
+            "version": "1.2.3",
+            "commits": []
+        }]);
+        let cliff_json = serde_json::to_string(&cliff_context).unwrap();
+
+        let result = inject_extra(&cliff_json, &ctx).unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(&result).unwrap();
+
+        // extra should be an empty object (not absent)
+        assert!(parsed[0]["extra"].is_object());
+        assert_eq!(parsed[0]["extra"].as_object().unwrap().len(), 0);
+    }
+
+    // ──────────────────────────────────────────────
+    // inject_extra: full pipeline context round-trip
+    // ──────────────────────────────────────────────
+
+    #[test]
+    fn inject_extra_full_context_round_trip() {
+        let mut ctx = test_ctx();
+        ctx.stats = Some(ReleaseStats {
+            commit_count: 15,
+            files_changed: 8,
+            insertions: 300,
+            deletions: 100,
+            contributors: vec![
+                Contributor {
+                    name: "Alice".into(),
+                    count: 10,
+                },
+                Contributor {
+                    name: "Bob".into(),
+                    count: 5,
+                },
+            ],
+        });
+        ctx.dependencies = vec![
+            DepChange {
+                name: "serde".into(),
+                from: Some("1.0.0".into()),
+                to: Some("1.0.1".into()),
+            },
+            DepChange {
+                name: "added-crate".into(),
+                from: None,
+                to: Some("0.1.0".into()),
+            },
+        ];
+        ctx.metadata
+            .insert("release_channel".into(), serde_json::json!("stable"));
+
+        let cliff_context = serde_json::json!([{
+            "version": "1.2.3",
+            "commits": [
+                {"id": "aaa", "message": "feat: add feature", "group": "Features"},
+                {"id": "bbb", "message": "fix: bug fix", "group": "Bug Fixes"}
+            ],
+            "statistics": {"commit_count": 2}
+        }]);
+        let cliff_json = serde_json::to_string(&cliff_context).unwrap();
+
+        let result = inject_extra(&cliff_json, &ctx).unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(&result).unwrap();
+        let extra = &parsed[0]["extra"];
+
+        // Stats
+        assert_eq!(extra["stats"]["commit_count"], 15);
+        assert_eq!(extra["stats"]["files_changed"], 8);
+        assert_eq!(extra["stats"]["insertions"], 300);
+        assert_eq!(extra["stats"]["deletions"], 100);
+        assert_eq!(extra["stats"]["contributors"].as_array().unwrap().len(), 2);
+
+        // Deps
+        assert_eq!(extra["deps"].as_array().unwrap().len(), 2);
+        assert_eq!(extra["deps"][0]["name"], "serde");
+        assert_eq!(extra["deps"][1]["name"], "added-crate");
+
+        // Metadata
+        assert_eq!(extra["metadata"]["release_channel"], "stable");
+
+        // Original cliff data intact
+        assert_eq!(parsed[0]["commits"].as_array().unwrap().len(), 2);
+    }
+
+    // ──────────────────────────────────────────────
+    // inject_extra: output is valid JSON string
+    // ──────────────────────────────────────────────
+
+    #[test]
+    fn inject_extra_produces_valid_json() {
+        let mut ctx = test_ctx();
+        ctx.stats = Some(ReleaseStats {
+            commit_count: 1,
+            files_changed: 1,
+            insertions: 10,
+            deletions: 0,
+            contributors: vec![],
+        });
+
+        let cliff_context = serde_json::json!([{"version": "1.2.3", "commits": []}]);
+        let cliff_json = serde_json::to_string(&cliff_context).unwrap();
+
+        let result = inject_extra(&cliff_json, &ctx).unwrap();
+        // Must parse without error
+        let parsed: Result<serde_json::Value, _> = serde_json::from_str(&result);
+        assert!(parsed.is_ok(), "inject_extra output is not valid JSON");
+    }
+
+    // ──────────────────────────────────────────────
+    // Built-in template: structural content assertions
+    // ──────────────────────────────────────────────
+
+    #[test]
+    fn builtin_template_has_dependency_section() {
+        assert!(
+            BUILTIN_TEMPLATE.contains("extra.deps"),
+            "template should reference extra.deps for dependency section"
+        );
+        assert!(
+            BUILTIN_TEMPLATE.contains("Dependencies"),
+            "template should have a Dependencies heading"
+        );
+    }
+
+    #[test]
+    fn builtin_template_has_stats_section() {
+        assert!(
+            BUILTIN_TEMPLATE.contains("extra.stats"),
+            "template should reference extra.stats for stats section"
+        );
+        assert!(
+            BUILTIN_TEMPLATE.contains("Stats"),
+            "template should have a Stats heading"
+        );
+    }
+
+    #[test]
+    fn builtin_template_has_breaking_changes_section() {
+        assert!(
+            BUILTIN_TEMPLATE.contains("breaking"),
+            "template should handle breaking changes"
+        );
+    }
+
+    #[test]
+    fn builtin_template_has_grouped_changes() {
+        assert!(
+            BUILTIN_TEMPLATE.contains("group_by"),
+            "template should group commits"
+        );
+        // Verify known group mappings
+        assert!(BUILTIN_TEMPLATE.contains("Added"));
+        assert!(BUILTIN_TEMPLATE.contains("Fixed"));
+    }
+
+    #[test]
+    fn builtin_template_has_full_commit_list() {
+        assert!(
+            BUILTIN_TEMPLATE.contains("<details>"),
+            "template should have collapsible section"
+        );
+        assert!(
+            BUILTIN_TEMPLATE.contains("Full commit list"),
+            "template should label the commit list"
+        );
+    }
+
+    #[test]
+    fn builtin_template_has_contributor_section() {
+        assert!(
+            BUILTIN_TEMPLATE.contains("contributors"),
+            "template should reference contributors"
+        );
+    }
+
+    #[test]
+    fn builtin_template_dep_update_format() {
+        // Verify the template uses the expected dep formatting
+        assert!(
+            BUILTIN_TEMPLATE.contains("d.from"),
+            "template should reference d.from for dep versions"
+        );
+        assert!(
+            BUILTIN_TEMPLATE.contains("d.to"),
+            "template should reference d.to for dep versions"
+        );
+        assert!(
+            BUILTIN_TEMPLATE.contains("d.name"),
+            "template should reference d.name for dep names"
+        );
+    }
+
+    #[test]
+    fn builtin_template_handles_added_and_removed_deps() {
+        assert!(
+            BUILTIN_TEMPLATE.contains("added"),
+            "template should mark added deps"
+        );
+        assert!(
+            BUILTIN_TEMPLATE.contains("removed"),
+            "template should mark removed deps"
+        );
+    }
+
+    // ──────────────────────────────────────────────
+    // NotesError: display strings
+    // ──────────────────────────────────────────────
+
+    #[test]
+    fn notes_error_cliff_context_display() {
+        let err = NotesError::CliffContext("something went wrong".into());
+        let msg = err.to_string();
+        assert_eq!(
+            msg,
+            "git-cliff context extraction failed: something went wrong"
+        );
+    }
+
+    #[test]
+    fn notes_error_cliff_render_display() {
+        let err = NotesError::CliffRender("render failed".into());
+        let msg = err.to_string();
+        assert_eq!(msg, "git-cliff rendering failed: render failed");
+    }
+
+    #[test]
+    fn notes_error_read_template_display() {
+        let err = NotesError::ReadTemplate {
+            path: "/tmp/missing.tera".into(),
+            source: std::io::Error::new(std::io::ErrorKind::NotFound, "file not found"),
+        };
+        let msg = err.to_string();
+        assert!(
+            msg.contains("/tmp/missing.tera"),
+            "error should contain the path"
+        );
+        assert!(
+            msg.contains("failed to read template"),
+            "error should describe what failed"
+        );
+    }
+
+    // ──────────────────────────────────────────────
+    // PreviewNotesOptions: defaults
+    // ──────────────────────────────────────────────
+
+    #[test]
+    fn preview_notes_options_defaults() {
+        let opts = PreviewNotesOptions::default();
+        assert!(opts.from.is_none());
+        assert!(opts.version.is_none());
+        assert!(opts.template.is_none());
+        assert!(!opts.no_deps);
+        assert!(!opts.no_stats);
+    }
+
+    #[test]
+    fn preview_notes_options_with_overrides() {
+        let opts = PreviewNotesOptions {
+            from: Some("v1.0.0".into()),
+            version: Some("2.0.0".into()),
+            template: Some("custom.tera".into()),
+            no_deps: true,
+            no_stats: true,
+        };
+        assert_eq!(opts.from.as_deref(), Some("v1.0.0"));
+        assert_eq!(opts.version.as_deref(), Some("2.0.0"));
+        assert_eq!(opts.template.as_deref(), Some("custom.tera"));
+        assert!(opts.no_deps);
+        assert!(opts.no_stats);
+    }
+
+    // ──────────────────────────────────────────────
+    // PreviewNotesResult: serialization
+    // ──────────────────────────────────────────────
+
+    #[test]
+    fn preview_notes_result_serializes() {
+        let result = PreviewNotesResult {
+            notes: "## 1.2.3\n\nSome notes".into(),
+            version: "1.2.3".into(),
+            previous_tag: "v1.1.0".into(),
+            tag: "v1.2.3".into(),
+        };
+
+        let json = serde_json::to_value(&result).unwrap();
+        assert_eq!(json["notes"], "## 1.2.3\n\nSome notes");
+        assert_eq!(json["version"], "1.2.3");
+        assert_eq!(json["previous_tag"], "v1.1.0");
+        assert_eq!(json["tag"], "v1.2.3");
+    }
+
+    #[test]
+    fn preview_notes_result_clone() {
+        let result = PreviewNotesResult {
+            notes: "notes".into(),
+            version: "1.0.0".into(),
+            previous_tag: "v0.9.0".into(),
+            tag: "v1.0.0".into(),
+        };
+        let cloned = result.clone();
+        assert_eq!(result.notes, cloned.notes);
+        assert_eq!(result.version, cloned.version);
+        assert_eq!(result.previous_tag, cloned.previous_tag);
+        assert_eq!(result.tag, cloned.tag);
+    }
+
+    // ──────────────────────────────────────────────
+    // detect_current_version: edge cases
+    // ──────────────────────────────────────────────
+
+    #[test]
+    fn detect_current_version_unknown_ecosystem() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let root = camino::Utf8Path::from_path(tmp.path()).unwrap();
+        // Unknown ecosystem should return None
+        assert!(detect_current_version(root, "python").is_none());
+        assert!(detect_current_version(root, "go").is_none());
+        assert!(detect_current_version(root, "").is_none());
+        assert!(detect_current_version(root, "generic").is_none());
+    }
+
+    #[test]
+    fn detect_current_version_rust_missing_file() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let root = camino::Utf8Path::from_path(tmp.path()).unwrap();
+        // No Cargo.toml exists
+        assert!(detect_current_version(root, "rust").is_none());
+    }
+
+    #[test]
+    fn detect_current_version_rust_valid() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let root = camino::Utf8Path::from_path(tmp.path()).unwrap();
+        std::fs::write(
+            tmp.path().join("Cargo.toml"),
+            "[package]\nname = \"test\"\nversion = \"3.2.1\"\n",
+        )
+        .unwrap();
+        assert_eq!(detect_current_version(root, "rust"), Some("3.2.1".into()));
+    }
+
+    #[test]
+    fn detect_current_version_rust_workspace_version_inline_table() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let root = camino::Utf8Path::from_path(tmp.path()).unwrap();
+        // version = { workspace = true } — value contains "workspace", should be skipped
+        std::fs::write(
+            tmp.path().join("Cargo.toml"),
+            "[package]\nname = \"test\"\nversion = { workspace = true }\n",
+        )
+        .unwrap();
+        assert!(detect_current_version(root, "rust").is_none());
+    }
+
+    #[test]
+    fn detect_current_version_rust_dotted_workspace_returns_non_version() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let root = camino::Utf8Path::from_path(tmp.path()).unwrap();
+        // version.workspace = true — starts with "version" and has "=",
+        // split_once yields ("version.workspace ", " true"). The value "true"
+        // doesn't contain "workspace", so the function returns Some("true").
+        // This is a known limitation of the quick-parse approach.
+        std::fs::write(
+            tmp.path().join("Cargo.toml"),
+            "[package]\nname = \"test\"\nversion.workspace = true\n",
+        )
+        .unwrap();
+        let result = detect_current_version(root, "rust");
+        // Documents actual behavior: returns Some("true"), not None
+        assert_eq!(result, Some("true".into()));
+    }
+
+    #[test]
+    fn detect_current_version_rust_version_in_wrong_section() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let root = camino::Utf8Path::from_path(tmp.path()).unwrap();
+        // version under [dependencies], not [package]
+        std::fs::write(
+            tmp.path().join("Cargo.toml"),
+            "[dependencies]\nserde = { version = \"1.0\" }\n",
+        )
+        .unwrap();
+        assert!(detect_current_version(root, "rust").is_none());
+    }
+
+    #[test]
+    fn detect_current_version_node_valid() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let root = camino::Utf8Path::from_path(tmp.path()).unwrap();
+        std::fs::write(
+            tmp.path().join("package.json"),
+            r#"{"name": "test", "version": "2.0.0"}"#,
+        )
+        .unwrap();
+        assert_eq!(detect_current_version(root, "node"), Some("2.0.0".into()));
+    }
+
+    #[test]
+    fn detect_current_version_node_missing_file() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let root = camino::Utf8Path::from_path(tmp.path()).unwrap();
+        assert!(detect_current_version(root, "node").is_none());
+    }
+
+    #[test]
+    fn detect_current_version_node_missing_version_field() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let root = camino::Utf8Path::from_path(tmp.path()).unwrap();
+        std::fs::write(tmp.path().join("package.json"), r#"{"name": "test"}"#).unwrap();
+        assert!(detect_current_version(root, "node").is_none());
+    }
+
+    #[test]
+    fn detect_current_version_node_invalid_json() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let root = camino::Utf8Path::from_path(tmp.path()).unwrap();
+        std::fs::write(tmp.path().join("package.json"), "not json").unwrap();
+        assert!(detect_current_version(root, "node").is_none());
+    }
+
+    #[test]
+    fn detect_current_version_rust_multiple_sections() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let root = camino::Utf8Path::from_path(tmp.path()).unwrap();
+        std::fs::write(
+            tmp.path().join("Cargo.toml"),
+            "[workspace]\nmembers = [\"crates/*\"]\n\n[package]\nname = \"root\"\nversion = \"5.0.0\"\n\n[dependencies]\nserde = \"1\"\n",
+        )
+        .unwrap();
+        assert_eq!(detect_current_version(root, "rust"), Some("5.0.0".into()));
+    }
+
+    // ──────────────────────────────────────────────
+    // build_extra: all three fields populated together
+    // ──────────────────────────────────────────────
+
+    #[test]
+    fn build_extra_all_three_keys_present() {
+        let mut ctx = test_ctx();
+        ctx.stats = Some(ReleaseStats {
+            commit_count: 1,
+            files_changed: 1,
+            insertions: 1,
+            deletions: 1,
+            contributors: vec![],
+        });
+        ctx.dependencies = vec![DepChange {
+            name: "x".into(),
+            from: None,
+            to: Some("1.0.0".into()),
+        }];
+        ctx.metadata.insert("k".into(), serde_json::json!("v"));
+
+        let extra = build_extra(&ctx);
+        let obj = extra.as_object().unwrap();
+        assert_eq!(obj.len(), 3, "should have exactly stats, deps, metadata");
+        assert!(obj.contains_key("stats"));
+        assert!(obj.contains_key("deps"));
+        assert!(obj.contains_key("metadata"));
+    }
+
+    // ──────────────────────────────────────────────
+    // build_extra: returns Value::Object type
+    // ──────────────────────────────────────────────
+
+    #[test]
+    fn build_extra_always_returns_object() {
+        // Even with no data, build_extra returns a JSON object (not null, array, etc.)
+        let ctx = test_ctx();
+        let extra = build_extra(&ctx);
+        assert!(extra.is_object(), "build_extra must return a JSON object");
     }
 }

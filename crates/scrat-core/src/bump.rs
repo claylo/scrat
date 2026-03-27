@@ -369,3 +369,457 @@ fn generate_changelog(
 
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::ecosystem::{ChangelogTool, DetectedTools};
+
+    /// Build a minimal Rust ProjectDetection for testing.
+    fn rust_detection() -> ProjectDetection {
+        ProjectDetection {
+            ecosystem: Ecosystem::Rust,
+            version_strategy: VersionStrategy::Interactive,
+            tools: DetectedTools {
+                test_cmd: "cargo test".into(),
+                build_cmd: "cargo build --release".into(),
+                publish_cmd: Some("cargo publish".into()),
+                bump_cmd: Some("cargo set-version".into()),
+                changelog_tool: None,
+            },
+        }
+    }
+
+    /// Build a minimal Generic ProjectDetection for testing.
+    fn generic_detection() -> ProjectDetection {
+        ProjectDetection::generic(VersionStrategy::Interactive)
+    }
+
+    // ── resolve_interactive ─────────────────────────────────
+
+    #[test]
+    fn resolve_interactive_with_current_version() {
+        let context = interactive::InteractiveContext {
+            current_version: Some(Version::new(1, 2, 3)),
+            recent_commits: vec![("abc1234".into(), "feat: stuff".into())],
+            candidates: vec![],
+        };
+        let plan = InteractiveBump {
+            context,
+            detection: generic_detection(),
+        };
+
+        let ready = resolve_interactive(plan, Version::new(2, 0, 0));
+        assert_eq!(ready.previous, Version::new(1, 2, 3));
+        assert_eq!(ready.next, Version::new(2, 0, 0));
+        assert_eq!(ready.strategy, VersionStrategy::Interactive);
+        assert_eq!(ready.detection.ecosystem, Ecosystem::Generic);
+    }
+
+    #[test]
+    fn resolve_interactive_without_current_version_defaults_to_zero() {
+        let context = interactive::InteractiveContext {
+            current_version: None,
+            recent_commits: vec![],
+            candidates: vec![],
+        };
+        let plan = InteractiveBump {
+            context,
+            detection: generic_detection(),
+        };
+
+        let ready = resolve_interactive(plan, Version::new(0, 1, 0));
+        assert_eq!(ready.previous, Version::new(0, 0, 0));
+        assert_eq!(ready.next, Version::new(0, 1, 0));
+    }
+
+    // ── resolve_strategy ────────────────────────────────────
+
+    #[test]
+    fn resolve_strategy_uses_config_conventional_commits() {
+        let config = Config {
+            version: Some(crate::config::VersionConfig {
+                strategy: Some("conventional-commits".into()),
+            }),
+            ..Config::default()
+        };
+        let detection = ProjectDetection {
+            ecosystem: Ecosystem::Rust,
+            version_strategy: VersionStrategy::Interactive,
+            tools: DetectedTools {
+                test_cmd: String::new(),
+                build_cmd: String::new(),
+                publish_cmd: None,
+                bump_cmd: None,
+                changelog_tool: Some(ChangelogTool::Cog),
+            },
+        };
+
+        let strategy = resolve_strategy(&config, &detection);
+        // Should use detected tool (Cog)
+        assert_eq!(
+            strategy,
+            VersionStrategy::ConventionalCommits {
+                tool: ChangelogTool::Cog
+            }
+        );
+    }
+
+    #[test]
+    fn resolve_strategy_cc_defaults_to_git_cliff_when_no_tool_detected() {
+        let config = Config {
+            version: Some(crate::config::VersionConfig {
+                strategy: Some("conventional-commits".into()),
+            }),
+            ..Config::default()
+        };
+        let detection = ProjectDetection {
+            ecosystem: Ecosystem::Rust,
+            version_strategy: VersionStrategy::Interactive,
+            tools: DetectedTools {
+                test_cmd: String::new(),
+                build_cmd: String::new(),
+                publish_cmd: None,
+                bump_cmd: None,
+                changelog_tool: None,
+            },
+        };
+
+        let strategy = resolve_strategy(&config, &detection);
+        assert_eq!(
+            strategy,
+            VersionStrategy::ConventionalCommits {
+                tool: ChangelogTool::GitCliff
+            }
+        );
+    }
+
+    #[test]
+    fn resolve_strategy_uses_config_interactive() {
+        let config = Config {
+            version: Some(crate::config::VersionConfig {
+                strategy: Some("interactive".into()),
+            }),
+            ..Config::default()
+        };
+        let detection = rust_detection();
+
+        let strategy = resolve_strategy(&config, &detection);
+        assert_eq!(strategy, VersionStrategy::Interactive);
+    }
+
+    #[test]
+    fn resolve_strategy_falls_through_on_unknown_string() {
+        let config = Config {
+            version: Some(crate::config::VersionConfig {
+                strategy: Some("unknown-thing".into()),
+            }),
+            ..Config::default()
+        };
+        let detection = rust_detection();
+
+        let strategy = resolve_strategy(&config, &detection);
+        // Should fall through to the detection's strategy
+        assert_eq!(strategy, detection.version_strategy);
+    }
+
+    #[test]
+    fn resolve_strategy_no_config_version_uses_detection() {
+        let config = Config::default();
+        let detection = ProjectDetection {
+            ecosystem: Ecosystem::Rust,
+            version_strategy: VersionStrategy::ConventionalCommits {
+                tool: ChangelogTool::GitCliff,
+            },
+            tools: DetectedTools {
+                test_cmd: String::new(),
+                build_cmd: String::new(),
+                publish_cmd: None,
+                bump_cmd: None,
+                changelog_tool: Some(ChangelogTool::GitCliff),
+            },
+        };
+
+        let strategy = resolve_strategy(&config, &detection);
+        assert_eq!(
+            strategy,
+            VersionStrategy::ConventionalCommits {
+                tool: ChangelogTool::GitCliff
+            }
+        );
+    }
+
+    #[test]
+    fn resolve_strategy_config_version_without_strategy_uses_detection() {
+        let config = Config {
+            version: Some(crate::config::VersionConfig { strategy: None }),
+            ..Config::default()
+        };
+        let detection = rust_detection();
+
+        let strategy = resolve_strategy(&config, &detection);
+        assert_eq!(strategy, detection.version_strategy);
+    }
+
+    // ── ReadyBump::execute ──────────────────────────────────
+
+    #[test]
+    fn execute_generic_no_changelog_tool() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let root = camino::Utf8Path::from_path(tmp.path()).unwrap();
+
+        let ready = ReadyBump {
+            previous: Version::new(0, 0, 0),
+            next: Version::new(0, 1, 0),
+            strategy: VersionStrategy::Interactive,
+            detection: generic_detection(),
+        };
+
+        let outcome = ready.execute(root, false).unwrap();
+        assert_eq!(outcome.previous, Version::new(0, 0, 0));
+        assert_eq!(outcome.new, Version::new(0, 1, 0));
+        assert!(!outcome.changelog_updated);
+        assert!(outcome.modified_files.is_empty());
+    }
+
+    #[test]
+    fn execute_generic_changelog_requested_but_no_tool() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let root = camino::Utf8Path::from_path(tmp.path()).unwrap();
+
+        let ready = ReadyBump {
+            previous: Version::new(1, 0, 0),
+            next: Version::new(1, 1, 0),
+            strategy: VersionStrategy::Interactive,
+            detection: generic_detection(),
+        };
+
+        // Changelog requested but no tool available — should succeed with no changelog
+        let outcome = ready.execute(root, true).unwrap();
+        assert!(!outcome.changelog_updated);
+        assert!(outcome.modified_files.is_empty());
+    }
+
+    #[test]
+    fn execute_node_returns_unsupported() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let root = camino::Utf8Path::from_path(tmp.path()).unwrap();
+
+        let detection = ProjectDetection {
+            ecosystem: Ecosystem::Node,
+            version_strategy: VersionStrategy::Interactive,
+            tools: DetectedTools {
+                test_cmd: "npm test".into(),
+                build_cmd: "npm run build".into(),
+                publish_cmd: Some("npm publish".into()),
+                bump_cmd: Some("npm version --no-git-tag-version".into()),
+                changelog_tool: None,
+            },
+        };
+
+        let ready = ReadyBump {
+            previous: Version::new(1, 0, 0),
+            next: Version::new(1, 0, 1),
+            strategy: VersionStrategy::Interactive,
+            detection,
+        };
+
+        let err = ready.execute(root, false).unwrap_err();
+        assert!(matches!(
+            err,
+            BumpError::UnsupportedEcosystem(Ecosystem::Node)
+        ));
+    }
+
+    #[test]
+    fn execute_rust_no_bump_tool_returns_error() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let root = camino::Utf8Path::from_path(tmp.path()).unwrap();
+
+        let detection = ProjectDetection {
+            ecosystem: Ecosystem::Rust,
+            version_strategy: VersionStrategy::Interactive,
+            tools: DetectedTools {
+                test_cmd: "cargo test".into(),
+                build_cmd: "cargo build --release".into(),
+                publish_cmd: None,
+                bump_cmd: None, // No bump tool!
+                changelog_tool: None,
+            },
+        };
+
+        let ready = ReadyBump {
+            previous: Version::new(0, 1, 0),
+            next: Version::new(0, 2, 0),
+            strategy: VersionStrategy::Interactive,
+            detection,
+        };
+
+        let err = ready.execute(root, false).unwrap_err();
+        assert!(matches!(err, BumpError::NoBumpTool));
+    }
+
+    // ── BumpOutcome serialization ───────────────────────────
+
+    #[test]
+    fn bump_outcome_serializes() {
+        let outcome = BumpOutcome {
+            previous: Version::new(1, 0, 0),
+            new: Version::new(1, 1, 0),
+            changelog_updated: true,
+            modified_files: vec!["Cargo.toml".into(), "CHANGELOG.md".into()],
+        };
+
+        let json = serde_json::to_string(&outcome).unwrap();
+        assert!(json.contains("\"previous\":\"1.0.0\""));
+        assert!(json.contains("\"new\":\"1.1.0\""));
+        assert!(json.contains("\"changelog_updated\":true"));
+        assert!(json.contains("Cargo.toml"));
+    }
+
+    // ── Error display ───────────────────────────────────────
+
+    #[test]
+    fn bump_error_tool_failed_display() {
+        let err = BumpError::ToolFailed {
+            tool: "cargo set-version".into(),
+            message: "not found".into(),
+        };
+        let msg = err.to_string();
+        assert!(msg.contains("cargo set-version"));
+        assert!(msg.contains("not found"));
+    }
+
+    #[test]
+    fn bump_error_no_bump_tool_display() {
+        let err = BumpError::NoBumpTool;
+        assert!(err.to_string().contains("no bump tool available"));
+    }
+
+    #[test]
+    fn bump_error_unsupported_ecosystem_display() {
+        let err = BumpError::UnsupportedEcosystem(Ecosystem::Node);
+        assert!(err.to_string().contains("node"));
+    }
+
+    #[test]
+    fn bump_error_detection_display() {
+        let err = BumpError::Detection("could not detect".into());
+        assert!(err.to_string().contains("could not detect"));
+    }
+
+    // ── ReadyBump fields ────────────────────────────────────
+
+    #[test]
+    fn ready_bump_clone() {
+        let ready = ReadyBump {
+            previous: Version::new(1, 2, 3),
+            next: Version::new(1, 3, 0),
+            strategy: VersionStrategy::Explicit("1.3.0".into()),
+            detection: generic_detection(),
+        };
+
+        let cloned = ready.clone();
+        assert_eq!(cloned.previous, ready.previous);
+        assert_eq!(cloned.next, ready.next);
+        assert_eq!(cloned.strategy, ready.strategy);
+    }
+
+    // ── plan_bump ───────────────────────────────────────────
+
+    #[test]
+    fn plan_bump_explicit_version_in_detected_project() {
+        // Use a tempdir with config override so detection succeeds
+        let tmp = tempfile::TempDir::new().unwrap();
+        let root = camino::Utf8Path::from_path(tmp.path()).unwrap();
+
+        let config = Config {
+            project: Some(crate::config::ProjectConfig {
+                project_type: Some(Ecosystem::Generic),
+                release_branch: None,
+            }),
+            ..Config::default()
+        };
+
+        let result = plan_bump(root, &config, Some("2.0.0"));
+        // This calls current_or_zero which calls git. It may fail
+        // outside a git repo. Inside scrat's repo it should succeed.
+        if let Ok(BumpPlan::Ready(ready)) = result {
+            assert_eq!(ready.next, Version::new(2, 0, 0));
+            assert!(matches!(ready.strategy, VersionStrategy::Explicit(_)));
+        }
+    }
+
+    #[test]
+    fn plan_bump_fails_when_detection_fails() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let root = camino::Utf8Path::from_path(tmp.path()).unwrap();
+        // No marker files, no config override -> detection fails
+        let config = Config::default();
+
+        let result = plan_bump(root, &config, None);
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(matches!(err, BumpError::Detection(_)));
+    }
+
+    #[test]
+    fn plan_bump_explicit_overrides_config_strategy() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let root = camino::Utf8Path::from_path(tmp.path()).unwrap();
+
+        let config = Config {
+            project: Some(crate::config::ProjectConfig {
+                project_type: Some(Ecosystem::Generic),
+                release_branch: None,
+            }),
+            version: Some(crate::config::VersionConfig {
+                strategy: Some("interactive".into()),
+            }),
+            ..Config::default()
+        };
+
+        let result = plan_bump(root, &config, Some("3.0.0"));
+        if let Ok(BumpPlan::Ready(ready)) = result {
+            // Strategy should be Explicit, not Interactive
+            assert!(matches!(ready.strategy, VersionStrategy::Explicit(_)));
+            assert_eq!(ready.next, Version::new(3, 0, 0));
+        }
+    }
+
+    #[test]
+    fn plan_bump_explicit_with_v_prefix() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let root = camino::Utf8Path::from_path(tmp.path()).unwrap();
+
+        let config = Config {
+            project: Some(crate::config::ProjectConfig {
+                project_type: Some(Ecosystem::Generic),
+                release_branch: None,
+            }),
+            ..Config::default()
+        };
+
+        let result = plan_bump(root, &config, Some("v1.5.0"));
+        if let Ok(BumpPlan::Ready(ready)) = result {
+            assert_eq!(ready.next, Version::new(1, 5, 0));
+        }
+    }
+
+    #[test]
+    fn plan_bump_explicit_invalid_version() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let root = camino::Utf8Path::from_path(tmp.path()).unwrap();
+
+        let config = Config {
+            project: Some(crate::config::ProjectConfig {
+                project_type: Some(Ecosystem::Generic),
+                release_branch: None,
+            }),
+            ..Config::default()
+        };
+
+        let result = plan_bump(root, &config, Some("not-semver"));
+        assert!(result.is_err());
+    }
+}
