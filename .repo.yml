@@ -7,7 +7,7 @@ categories:
 copyright_name: Clay Loveless
 copyright_year: '2026'
 edition: '2024'
-has_agents_md: true
+has_agents_md: false
 has_attestations: true
 has_benchmarks: false
 has_claude: true
@@ -25,7 +25,7 @@ has_inquire: true
 has_issue_templates: true
 has_jsonl_logging: true
 has_mcp_server: false
-has_md: true
+has_md: false
 has_md_strict: false
 has_opentelemetry: false
 has_pr_templates: true
