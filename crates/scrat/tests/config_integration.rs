@@ -104,11 +104,7 @@ fn discovers_dotconfig_directory_config() {
     let tmp = TempDir::new().unwrap();
     let dotconfig = tmp.path().join(".config");
     fs::create_dir_all(&dotconfig).unwrap();
-    fs::write(
-        dotconfig.join("scrat.toml"),
-        r#"log_level = "debug""#,
-    )
-    .unwrap();
+    fs::write(dotconfig.join("scrat.toml"), r#"log_level = "debug""#).unwrap();
 
     let json = info_json(tmp.path());
 
@@ -127,20 +123,15 @@ fn dotconfig_takes_precedence_over_dotfile() {
     fs::create_dir_all(&dotconfig).unwrap();
 
     // .config/ gets debug, dotfile gets error — .config/ should win
-    fs::write(
-        dotconfig.join("scrat.toml"),
-        r#"log_level = "debug""#,
-    )
-    .unwrap();
-    fs::write(
-        tmp.path().join(".scrat.toml"),
-        r#"log_level = "error""#,
-    )
-    .unwrap();
+    fs::write(dotconfig.join("scrat.toml"), r#"log_level = "debug""#).unwrap();
+    fs::write(tmp.path().join(".scrat.toml"), r#"log_level = "error""#).unwrap();
 
     let json = info_json(tmp.path());
 
-    assert_eq!(json["config"]["log_level"], "debug", ".config/ should win over dotfile");
+    assert_eq!(
+        json["config"]["log_level"], "debug",
+        ".config/ should win over dotfile"
+    );
 }
 
 #[test]

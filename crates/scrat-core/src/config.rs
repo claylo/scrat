@@ -628,16 +628,8 @@ log_dir = "/tmp/scrat"
         fs::create_dir_all(&dotconfig_dir).unwrap();
 
         // Create both .config/project.toml and .project.toml
-        fs::write(
-            dotconfig_dir.join("scrat.toml"),
-            r#"log_level = "debug""#,
-        )
-        .unwrap();
-        fs::write(
-            project_dir.join(".scrat.toml"),
-            r#"log_level = "warn""#,
-        )
-        .unwrap();
+        fs::write(dotconfig_dir.join("scrat.toml"), r#"log_level = "debug""#).unwrap();
+        fs::write(project_dir.join(".scrat.toml"), r#"log_level = "warn""#).unwrap();
 
         let project_dir = Utf8PathBuf::try_from(project_dir).unwrap();
 
