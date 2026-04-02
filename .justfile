@@ -92,7 +92,7 @@ bootstrap:
     echo "  target/debug/scrat --help"
 
 fmt:
-  cargo fmt --all
+  cargo fmt --all -- --config-path .config/rustfmt.toml
 
 clippy:
   cargo +{{toolchain}} clippy --all-targets --all-features --message-format=short -- -D warnings
@@ -103,7 +103,7 @@ fix:
 
 # Check dependencies for security advisories and license compliance
 deny:
-  cd .config && cargo deny --manifest-path ../Cargo.toml check
+  cargo deny check --config .config/deny.toml
 
 test:
   cargo nextest run
