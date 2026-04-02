@@ -330,9 +330,10 @@ Config files are discovered automatically.
 Precedence (highest first):
 
 1. Explicit file via `--config <path>`
-2. `.scrat.toml` / `scrat.toml` in current directory (walks up to `.git` boundary)
-3. `~/.config/scrat/config.toml` (user config)
-4. Built-in defaults
+2. `.config/scrat.toml` in current directory (walks up to `.git` boundary)
+3. `.scrat.toml` / `scrat.toml` in current directory (walks up to `.git` boundary)
+4. `~/.config/scrat/config.toml` (user config)
+5. Built-in defaults
 
 **Supported formats:** TOML, YAML, JSON.
 

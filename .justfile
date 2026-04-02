@@ -103,7 +103,7 @@ fix:
 
 # Check dependencies for security advisories and license compliance
 deny:
-  cargo deny check
+  cd .config && cargo deny --manifest-path ../Cargo.toml check
 
 test:
   cargo nextest run
@@ -116,7 +116,6 @@ doc-test:
 
 cov:
   @cargo llvm-cov clean --workspace
-
   cargo llvm-cov nextest --no-report
   @cargo llvm-cov report --html
   @cargo llvm-cov report --summary-only --json --output-path target/llvm-cov/summary.json
@@ -154,7 +153,6 @@ mdfix *files='':
         echo "Install rumdl (cargo bininstall rumdl) or markdownlint (npm i -g markdownlint-cli)"
         exit 1
     fi
-
 
 
 

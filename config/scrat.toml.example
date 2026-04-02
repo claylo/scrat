@@ -1,6 +1,7 @@
 # scrat Configuration (TOML format)
 #
 # Copy this file to one of the following locations:
+#   - .config/scrat.toml (in your project directory)
 #   - .scrat.toml (in your project directory)
 #   - scrat.toml (in your project directory)
 #   - ~/.config/scrat/config.toml (user-wide config)

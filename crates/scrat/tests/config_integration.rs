@@ -100,6 +100,50 @@ fn discovers_config_in_parent_directory() {
 }
 
 #[test]
+fn discovers_dotconfig_directory_config() {
+    let tmp = TempDir::new().unwrap();
+    let dotconfig = tmp.path().join(".config");
+    fs::create_dir_all(&dotconfig).unwrap();
+    fs::write(
+        dotconfig.join("scrat.toml"),
+        r#"log_level = "debug""#,
+    )
+    .unwrap();
+
+    let json = info_json(tmp.path());
+
+    assert_eq!(json["config"]["log_level"], "debug");
+    let reported = json["config"]["config_file"].as_str().unwrap();
+    assert!(
+        reported.contains(".config/"),
+        "should report .config/ path: {reported}"
+    );
+}
+
+#[test]
+fn dotconfig_takes_precedence_over_dotfile() {
+    let tmp = TempDir::new().unwrap();
+    let dotconfig = tmp.path().join(".config");
+    fs::create_dir_all(&dotconfig).unwrap();
+
+    // .config/ gets debug, dotfile gets error — .config/ should win
+    fs::write(
+        dotconfig.join("scrat.toml"),
+        r#"log_level = "debug""#,
+    )
+    .unwrap();
+    fs::write(
+        tmp.path().join(".scrat.toml"),
+        r#"log_level = "error""#,
+    )
+    .unwrap();
+
+    let json = info_json(tmp.path());
+
+    assert_eq!(json["config"]["log_level"], "debug", ".config/ should win over dotfile");
+}
+
+#[test]
 fn dotfile_takes_precedence_over_regular_name() {
     let tmp = TempDir::new().unwrap();
 

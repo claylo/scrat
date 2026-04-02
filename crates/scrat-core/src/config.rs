@@ -13,6 +13,7 @@
 //! - JSON (`.json`)
 //!
 //! # Config file locations (in order of precedence, highest first):
+//! - `.config/scrat.<ext>` in current directory or any parent
 //! - `.scrat.<ext>` in current directory or any parent
 //! - `scrat.<ext>` in current directory or any parent
 //! - `~/.config/scrat/config.<ext>` (user config)
@@ -401,13 +402,19 @@ impl ConfigLoader {
         while let Some(dir) = current {
             // Check for config files in this directory (try each extension)
             for ext in CONFIG_EXTENSIONS {
-                // Try dotfile first (.scrat.toml)
+                // Try .config/ directory first (.config/scrat.toml)
+                let dotconfig = dir.join(format!(".config/{APP_NAME}.{ext}"));
+                if dotconfig.is_file() {
+                    return Some(dotconfig);
+                }
+
+                // Then dotfile (.scrat.toml)
                 let dotfile = dir.join(format!(".{APP_NAME}.{ext}"));
                 if dotfile.is_file() {
                     return Some(dotfile);
                 }
 
-                // Then try regular name (scrat.toml)
+                // Then regular name (scrat.toml)
                 let regular = dir.join(format!("{APP_NAME}.{ext}"));
                 if regular.is_file() {
                     return Some(regular);
@@ -611,6 +618,40 @@ log_dir = "/tmp/scrat"
 
         assert_eq!(config.log_level, LogLevel::Debug);
         assert!(sources.project_file.is_some());
+    }
+
+    #[test]
+    fn test_dotconfig_directory_takes_precedence() {
+        let tmp = TempDir::new().unwrap();
+        let project_dir = tmp.path().join("project");
+        let dotconfig_dir = project_dir.join(".config");
+        fs::create_dir_all(&dotconfig_dir).unwrap();
+
+        // Create both .config/project.toml and .project.toml
+        fs::write(
+            dotconfig_dir.join("scrat.toml"),
+            r#"log_level = "debug""#,
+        )
+        .unwrap();
+        fs::write(
+            project_dir.join(".scrat.toml"),
+            r#"log_level = "warn""#,
+        )
+        .unwrap();
+
+        let project_dir = Utf8PathBuf::try_from(project_dir).unwrap();
+
+        let (config, sources) = ConfigLoader::new()
+            .with_user_config(false)
+            .without_boundary_marker()
+            .with_project_search(&project_dir)
+            .load()
+            .unwrap();
+
+        // .config/ should win over dotfile
+        assert_eq!(config.log_level, LogLevel::Debug);
+        let found = sources.project_file.unwrap();
+        assert!(found.as_str().contains(".config/"));
     }
 
     #[test]
