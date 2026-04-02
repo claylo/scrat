@@ -36,7 +36,7 @@ jobs:
           toolchain: stable
 
       - name: rustfmt
-        run: cargo fmt --check
+        run: cargo fmt --check -- --config-path .config/rustfmt.toml
 
       - name: clippy
         run: cargo clippy --all-targets --all-features -- -D warnings
@@ -81,6 +81,9 @@ jobs:
 
       - name: Check dependencies
         uses: EmbarkStudios/cargo-deny-action@3fd3802e88374d3fe9159b834c7714ec57d6c979 # v2.0.15
+        with:
+          command: check
+          command-arguments: --config .config/deny.toml
 
   msrv:
     name: msrv

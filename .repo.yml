@@ -1,5 +1,5 @@
 # Changes here will be overwritten by Copier
-_commit: v1.1.0
+_commit: v1.2.0
 _src_path: gh:claylo/claylo-rs
 categories:
 - command-line-utilities
@@ -7,7 +7,7 @@ categories:
 copyright_name: Clay Loveless
 copyright_year: '2026'
 edition: '2024'
-has_agents_md: true
+has_agents_md: false
 has_attestations: true
 has_benchmarks: false
 has_claude: true
@@ -25,14 +25,12 @@ has_inquire: true
 has_issue_templates: true
 has_jsonl_logging: true
 has_mcp_server: false
-has_md: true
-has_md_strict: false
+has_md: false
 has_opentelemetry: false
 has_pr_templates: true
 has_releases: true
 has_roadmap_votes: false
 has_security_md: true
-has_site: false
 has_yamlfmt: false
 has_yamllint: false
 hook_system: none

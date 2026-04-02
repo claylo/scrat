@@ -1,6 +1,7 @@
 # scrat Configuration (YAML format)
 #
 # Copy this file to one of the following locations:
+#   - .config/scrat.yaml (in your project directory)
 #   - .scrat.yaml (in your project directory)
 #   - scrat.yaml (in your project directory)
 #   - ~/.config/scrat/config.yaml (user-wide config)

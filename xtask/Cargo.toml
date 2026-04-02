@@ -10,5 +10,5 @@ homepage.workspace = true
 [dependencies]
 clap = { version = "4.6", features = ["derive"] }
 clap_complete = "4.6"
-clap_mangen = "0.2"
+clap_mangen = "0.3"
 scrat = { path = "../crates/scrat" }

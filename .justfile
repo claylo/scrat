@@ -92,7 +92,7 @@ bootstrap:
     echo "  target/debug/scrat --help"
 
 fmt:
-  cargo fmt --all
+  cargo fmt --all -- --config-path .config/rustfmt.toml
 
 clippy:
   cargo +{{toolchain}} clippy --all-targets --all-features --message-format=short -- -D warnings
@@ -103,7 +103,7 @@ fix:
 
 # Check dependencies for security advisories and license compliance
 deny:
-  cargo deny check
+  cargo deny check --config .config/deny.toml
 
 test:
   cargo nextest run
@@ -116,7 +116,6 @@ doc-test:
 
 cov:
   @cargo llvm-cov clean --workspace
-
   cargo llvm-cov nextest --no-report
   @cargo llvm-cov report --html
   @cargo llvm-cov report --summary-only --json --output-path target/llvm-cov/summary.json
@@ -154,7 +153,6 @@ mdfix *files='':
         echo "Install rumdl (cargo bininstall rumdl) or markdownlint (npm i -g markdownlint-cli)"
         exit 1
     fi
-
 
 
 

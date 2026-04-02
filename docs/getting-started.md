@@ -256,8 +256,9 @@ confirm = true  # default — set to false for CI/scripted use
 ```
 
 Config files are discovered automatically:
-1. `.scrat.toml` or `scrat.toml` in your project directory (searched up to the repo root)
-2. `~/.config/scrat/config.toml` for user-wide defaults
+1. `.config/scrat.toml` in your project directory (searched up to the repo root)
+2. `.scrat.toml` or `scrat.toml` in your project directory (searched up to the repo root)
+3. `~/.config/scrat/config.toml` for user-wide defaults
 
 Supported formats: TOML, YAML, JSON. Use whichever you prefer.
 
