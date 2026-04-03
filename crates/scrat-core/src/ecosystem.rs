@@ -107,6 +107,25 @@ impl Ecosystem {
         Self::Swift,
         Self::Generic,
     ];
+
+    /// Return the built-in git-cliff `[bump]` configuration for this ecosystem.
+    ///
+    /// Rust treats `0.x` as stable (breaking changes bump minor, not major).
+    /// All other ecosystems follow standard semver.
+    pub fn bump_config(&self) -> &'static str {
+        match self {
+            Self::Rust => concat!(
+                "[bump]\n",
+                "breaking_always_bump_minor = true\n",
+                "breaking_always_bump_major = false\n",
+            ),
+            _ => concat!(
+                "[bump]\n",
+                "breaking_always_bump_minor = false\n",
+                "breaking_always_bump_major = true\n",
+            ),
+        }
+    }
 }
 
 /// Version-determination strategy.
@@ -140,15 +159,12 @@ impl fmt::Display for VersionStrategy {
 pub enum ChangelogTool {
     /// [git-cliff](https://git-cliff.org/) — template-driven changelogs.
     GitCliff,
-    /// [cocogitto](https://docs.cocogitto.io/) — conventional-commit tooling.
-    Cog,
 }
 
 impl fmt::Display for ChangelogTool {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::GitCliff => write!(f, "git-cliff"),
-            Self::Cog => write!(f, "cog"),
         }
     }
 }
@@ -231,7 +247,6 @@ mod tests {
     #[test]
     fn changelog_tool_display() {
         assert_eq!(ChangelogTool::GitCliff.to_string(), "git-cliff");
-        assert_eq!(ChangelogTool::Cog.to_string(), "cog");
     }
 
     #[test]
@@ -257,10 +272,28 @@ mod tests {
     #[test]
     fn serde_roundtrip_version_strategy() {
         let strategy = VersionStrategy::ConventionalCommits {
-            tool: ChangelogTool::Cog,
+            tool: ChangelogTool::GitCliff,
         };
         let json = serde_json::to_string(&strategy).unwrap();
         let parsed: VersionStrategy = serde_json::from_str(&json).unwrap();
         assert_eq!(parsed, strategy);
+    }
+
+    #[test]
+    fn rust_bump_config_disables_breaking_always_major() {
+        let cfg = Ecosystem::Rust.bump_config();
+        assert!(cfg.contains("breaking_always_bump_major = false"));
+    }
+
+    #[test]
+    fn node_bump_config_enables_breaking_always_major() {
+        let cfg = Ecosystem::Node.bump_config();
+        assert!(cfg.contains("breaking_always_bump_major = true"));
+    }
+
+    #[test]
+    fn generic_bump_config_enables_breaking_always_major() {
+        let cfg = Ecosystem::Generic.bump_config();
+        assert!(cfg.contains("breaking_always_bump_major = true"));
     }
 }

@@ -742,16 +742,6 @@ mod tests {
     }
 
     #[test]
-    fn check_required_tools_with_cog_changelog_tool() {
-        let det = detection_with_changelog(ChangelogTool::Cog);
-        let result = check_required_tools(&det);
-        assert_eq!(result.name, "Required tools");
-        // Cog path does not do version checking (only git-cliff does),
-        // so if "cog" binary is missing it shows up in missing list,
-        // if present it passes. No version check branch.
-    }
-
-    #[test]
     fn check_required_tools_multiple_missing() {
         // Both test_cmd and bump_cmd point to nonexistent tools
         let det = ProjectDetection {

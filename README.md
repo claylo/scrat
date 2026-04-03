@@ -111,7 +111,7 @@ Three strategies, auto-detected:
 
 | Strategy | When | How |
 |----------|------|-----|
-| **Conventional Commits** | `cliff.toml` present | Analyzes commit messages to determine major/minor/patch |
+| **Conventional Commits** | `git-cliff` installed | Analyzes commit messages to determine major/minor/patch |
 | **Explicit** | `--version 1.2.3` passed | Uses exactly what you give it |
 | **Interactive** | Fallback | Shows recent commits, offers version candidates, you pick |
 
@@ -358,6 +358,8 @@ log_level = "info"
 [version]
 # Override version strategy: conventional-commits, interactive, explicit
 # strategy = "conventional-commits"
+# Use your own cliff.toml for version computation instead of scrat's built-in
+# cliff_config = "cliff.toml"
 
 [commands]
 # Override per-phase commands (default: auto-detected per ecosystem)

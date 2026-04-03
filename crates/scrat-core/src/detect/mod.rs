@@ -90,24 +90,18 @@ fn detect_ecosystem(project_root: &Utf8Path) -> Option<Ecosystem> {
     None
 }
 
-/// Determine the version strategy from config files in the project root.
+/// Determine the version strategy from available tooling.
 ///
 /// Priority:
-/// 1. `cliff.toml` → `ConventionalCommits(GitCliff)`
-/// 2. `cog.toml`   → `ConventionalCommits(Cog)`
-/// 3. Neither      → `Interactive`
+/// 1. `git-cliff` binary on PATH → `ConventionalCommits(GitCliff)`
+/// 2. Neither                    → `Interactive`
 pub fn detect_version_strategy(project_root: &Utf8Path) -> VersionStrategy {
-    if project_root.join("cliff.toml").is_file() {
-        debug!("found cliff.toml");
+    let _ = project_root; // reserved for future per-project tool config
+
+    if has_binary("git-cliff") {
+        debug!("git-cliff binary found on PATH");
         return VersionStrategy::ConventionalCommits {
             tool: ChangelogTool::GitCliff,
-        };
-    }
-
-    if project_root.join("cog.toml").is_file() {
-        debug!("found cog.toml");
-        return VersionStrategy::ConventionalCommits {
-            tool: ChangelogTool::Cog,
         };
     }
 
@@ -368,49 +362,21 @@ mod tests {
     }
 
     #[test]
-    fn detect_cc_strategy_cliff() {
+    fn detect_cc_strategy_when_git_cliff_available() {
         let tmp = TempDir::new().unwrap();
         fs::write(tmp.path().join("Cargo.toml"), "[package]").unwrap();
-        fs::write(tmp.path().join("cliff.toml"), "").unwrap();
 
         let det = detect_project(utf8_tmp(&tmp)).unwrap();
-        assert_eq!(
-            det.version_strategy,
-            VersionStrategy::ConventionalCommits {
-                tool: ChangelogTool::GitCliff
-            }
-        );
-    }
-
-    #[test]
-    fn detect_cc_strategy_cog() {
-        let tmp = TempDir::new().unwrap();
-        fs::write(tmp.path().join("Cargo.toml"), "[package]").unwrap();
-        fs::write(tmp.path().join("cog.toml"), "").unwrap();
-
-        let det = detect_project(utf8_tmp(&tmp)).unwrap();
-        assert_eq!(
-            det.version_strategy,
-            VersionStrategy::ConventionalCommits {
-                tool: ChangelogTool::Cog
-            }
-        );
-    }
-
-    #[test]
-    fn cliff_takes_priority_over_cog() {
-        let tmp = TempDir::new().unwrap();
-        fs::write(tmp.path().join("Cargo.toml"), "[package]").unwrap();
-        fs::write(tmp.path().join("cliff.toml"), "").unwrap();
-        fs::write(tmp.path().join("cog.toml"), "").unwrap();
-
-        let det = detect_project(utf8_tmp(&tmp)).unwrap();
-        assert!(matches!(
-            det.version_strategy,
-            VersionStrategy::ConventionalCommits {
-                tool: ChangelogTool::GitCliff
-            }
-        ));
+        if super::has_binary("git-cliff") {
+            assert_eq!(
+                det.version_strategy,
+                VersionStrategy::ConventionalCommits {
+                    tool: ChangelogTool::GitCliff
+                }
+            );
+        } else {
+            assert_eq!(det.version_strategy, VersionStrategy::Interactive);
+        }
     }
 
     #[test]
@@ -451,11 +417,20 @@ mod tests {
     }
 
     #[test]
-    fn interactive_when_no_cc_config() {
+    fn detect_version_strategy_unit() {
         let tmp = TempDir::new().unwrap();
-        fs::write(tmp.path().join("Cargo.toml"), "[package]").unwrap();
+        let root = utf8_tmp(&tmp);
 
-        let det = detect_project(utf8_tmp(&tmp)).unwrap();
-        assert_eq!(det.version_strategy, VersionStrategy::Interactive);
+        let strategy = detect_version_strategy(root);
+        if super::has_binary("git-cliff") {
+            assert!(matches!(
+                strategy,
+                VersionStrategy::ConventionalCommits {
+                    tool: ChangelogTool::GitCliff
+                }
+            ));
+        } else {
+            assert_eq!(strategy, VersionStrategy::Interactive);
+        }
     }
 }

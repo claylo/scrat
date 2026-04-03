@@ -82,13 +82,17 @@ pub struct ProjectConfig {
 
 /// Version strategy configuration.
 ///
-/// Normally auto-detected from the presence of `cliff.toml` / `cog.toml`.
+/// Normally auto-detected from the `git-cliff` binary on PATH.
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
 pub struct VersionConfig {
     /// Override the version strategy.
     ///
     /// Possible values: `"conventional-commits"`, `"interactive"`, `"explicit"`.
     pub strategy: Option<String>,
+    /// Path to a cliff.toml to use for version computation instead of scrat's
+    /// built-in per-ecosystem config. When set, scrat passes this to
+    /// `git-cliff --bumped-version --config <path>`.
+    pub cliff_config: Option<String>,
 }
 
 /// Command overrides for each phase of the release workflow.
@@ -110,7 +114,7 @@ pub struct CommandsConfig {
 /// Release workflow configuration.
 #[derive(Debug, Clone, Default, Deserialize, Serialize, PartialEq, Eq)]
 pub struct ReleaseConfig {
-    /// Override the changelog tool (`"git-cliff"` or `"cog"`).
+    /// Override the changelog tool (currently only `"git-cliff"` is supported).
     pub changelog_tool: Option<ChangelogTool>,
     /// Whether to create a GitHub release (default: `true`).
     pub github_release: Option<bool>,
