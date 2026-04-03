@@ -112,7 +112,7 @@ impl Ecosystem {
     ///
     /// Rust treats `0.x` as stable (breaking changes bump minor, not major).
     /// All other ecosystems follow standard semver.
-    pub fn bump_config(&self) -> &'static str {
+    pub const fn bump_config(&self) -> &'static str {
         match self {
             Self::Rust => concat!(
                 "[bump]\n",
