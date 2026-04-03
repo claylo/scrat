@@ -692,7 +692,11 @@ impl ReadyShip {
             .and_then(|r| r.title.as_deref())
             .map(|t| hooks::interpolate_command(t, &hook_ctx));
         let discussion_category = release_cfg.and_then(|r| r.discussion_category.as_deref());
-        let assets = release_cfg.and_then(|r| r.assets.as_deref()).unwrap_or(&[]);
+        let assets_raw = release_cfg.and_then(|r| r.assets.as_deref()).unwrap_or(&[]);
+        let assets: Vec<String> = assets_raw
+            .iter()
+            .map(|a| hooks::interpolate_command(a, &hook_ctx))
+            .collect();
 
         on_event(ShipEvent::PhaseStarted(ShipPhase::Release));
         let release_outcome = if self.options.no_release {
@@ -735,7 +739,7 @@ impl ReadyShip {
                 title,
                 draft,
                 notes_file: notes_path,
-                assets,
+                assets: &assets,
                 discussion_category,
                 project_root,
             };
