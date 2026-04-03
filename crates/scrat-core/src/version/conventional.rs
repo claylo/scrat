@@ -8,7 +8,7 @@ use semver::Version;
 use tracing::{debug, instrument};
 
 use crate::ecosystem::{ChangelogTool, Ecosystem};
-use crate::version::{parse_version, VersionError, VersionResult};
+use crate::version::{VersionError, VersionResult, parse_version};
 
 /// Compute the next version using git-cliff.
 ///

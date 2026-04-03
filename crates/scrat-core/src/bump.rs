@@ -650,7 +650,10 @@ mod tests {
     #[test]
     fn resolve_strategy_config_version_without_strategy_uses_detection() {
         let config = Config {
-            version: Some(crate::config::VersionConfig { strategy: None, cliff_config: None }),
+            version: Some(crate::config::VersionConfig {
+                strategy: None,
+                cliff_config: None,
+            }),
             ..Config::default()
         };
         let detection = rust_detection();
