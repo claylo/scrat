@@ -87,7 +87,7 @@ log_level = "info"
 # subsequent commands resume in parallel.
 #
 # Phase order:
-#   pre_ship → test → bump → publish → git → release → post_ship
+#   pre_ship → test → bump → git → release → publish → post_ship
 
 # [hooks]
 # # Bracket the entire ship workflow

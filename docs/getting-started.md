@@ -84,7 +84,7 @@ These same checks run automatically at the start of `scrat ship`. You can't skip
 `scrat ship` runs the full release pipeline in order:
 
 ```
-preflight → test → bump → publish → git → release
+preflight → test → bump → git → release → publish
 ```
 
 Each phase does exactly one thing:
@@ -94,9 +94,9 @@ Each phase does exactly one thing:
 | **preflight** | All six safety checks pass (or scrat stops) |
 | **test** | Runs your test suite (`cargo nextest run` by default) |
 | **bump** | Updates version in Cargo.toml, generates CHANGELOG.md |
-| **publish** | Runs `cargo publish` to push to crates.io |
 | **git** | Commits changes, creates annotated tag, pushes branch + tags |
 | **release** | Creates a GitHub release with auto-generated notes via `gh` |
+| **publish** | Runs `cargo publish` to push to crates.io |
 
 Tests run **before** the version bump. If tests fail, nothing has been modified. Your working tree is exactly how you left it.
 
@@ -108,7 +108,7 @@ By default, `scrat ship` shows you the plan and asks before executing:
 Ship: 0.1.0 → 0.2.0
 Strategy: conventional-commits (git-cliff) | Ecosystem: rust
 
-  Phases: test, bump, publish, git, release
+  Phases: test, bump, git, release, publish
   Hooks: 3 hook commands
 
 ? Proceed with release? (Y/n)
@@ -288,10 +288,6 @@ post_test = ["echo 'Tests passed.'"]
 pre_bump = ["echo 'Pre-bump tasks'"]
 post_bump = ["generate-release-card --version {version} --output release-card.png"]
 
-# Before/after publishing to registry
-pre_publish = ["cargo build --release"]
-post_publish = ["echo 'Published {version}'"]
-
 # Before/after git commit + tag + push
 pre_tag = ["echo 'About to tag {tag}'"]
 post_tag = ["echo 'Pushed {tag}'"]
@@ -299,6 +295,10 @@ post_tag = ["echo 'Pushed {tag}'"]
 # Before/after GitHub release creation
 pre_release = ["echo 'Creating release...'"]
 post_release = ["echo 'Released {owner}/{repo}@{tag}'"]
+
+# Before/after publishing to registry
+pre_publish = ["cargo build --release"]
+post_publish = ["echo 'Published {version}'"]
 ```
 
 ### Variables
@@ -396,14 +396,15 @@ scrat shows you the version, which phases will run, and how many hooks are confi
 - Create an annotated tag `vX.Y.Z`
 - Push the branch and tags
 - Create a GitHub release
+- Publish to crates.io
 
 **4. If something goes wrong**
 
 If a phase fails, scrat stops immediately. No partial state. Here's what to do:
 
 - **Tests failed**: Fix the tests and try again. Nothing was modified.
-- **Publish failed**: The version was bumped and committed locally but not pushed. Fix the publish issue (auth, network, etc.) and either retry or push manually.
 - **Push failed**: Everything is committed and tagged locally. Fix the remote issue and `git push && git push --tags`.
+- **Publish failed**: The tag, push, and GitHub release already succeeded. Fix the publish issue (auth, network, etc.) and re-run `cargo publish` (or your ecosystem's publish command) manually.
 
 The worst case is always "some things happened locally that you can inspect and fix." scrat never leaves you in a state where remote and local are inconsistent without telling you.
 

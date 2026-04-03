@@ -159,7 +159,7 @@ draft = true
 #   sync:   prefix = barrier (wait for prior, run alone, then continue)
 #   filter: prefix = sync + JSON stdin/stdout for pipeline mutation
 #
-# Phase order: pre_ship → test → bump → publish → git → release → post_ship
+# Phase order: pre_ship → test → bump → git → release → publish → post_ship
 #
 # [hooks]
 # pre_ship = []
@@ -237,7 +237,7 @@ release:
 #   sync:   prefix = barrier (wait for prior, run alone, then continue)
 #   filter: prefix = sync + JSON stdin/stdout for pipeline mutation
 #
-# Phase order: pre_ship → test → bump → publish → git → release → post_ship
+# Phase order: pre_ship → test → bump → git → release → publish → post_ship
 #
 # hooks:
 #   pre_ship: []

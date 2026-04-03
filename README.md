@@ -155,25 +155,7 @@ Updates version numbers in project files and generates the changelog.
 Skip changelog generation with `--no-changelog`.
 Run `scrat bump` standalone to bump without shipping.
 
-### 5. Publish
-
-Publishes to a package registry.
-Auto-detected:
-
-| Ecosystem | Default Command |
-|-----------|----------------|
-| Rust | `cargo publish` |
-| Node | `npm publish` |
-| Python | `twine upload dist/*` |
-| Ruby | `gem push` |
-| Go | (none — Go modules publish via `git push`) |
-| Swift | (none — Swift packages distribute via git URLs) |
-| PHP | (none — set `commands.publish` if needed) |
-
-Skip with `--no-publish`.
-Override with `commands.publish` in config.
-
-### 6. Dependency Diff
+### 5. Dependency Diff
 
 Diffs lockfiles between the previous tag and HEAD to find what changed.
 
@@ -194,7 +176,7 @@ Results feed into release notes automatically.
 
 Skip with `--no-deps`.
 
-### 7. Stats Collection
+### 6. Stats Collection
 
 Gathers release statistics from git:
 
@@ -207,7 +189,7 @@ Results feed into release notes.
 
 Skip with `--no-stats`.
 
-### 8. Release Notes
+### 7. Release Notes
 
 Renders release notes using a two-pass git-cliff pattern:
 
@@ -226,7 +208,7 @@ or `--template` on `scrat notes`.
 Skip with `--no-notes`.
 Falls back to `--generate-notes` (GitHub's auto-generated notes) if rendering fails.
 
-### 9. Git
+### 8. Git
 
 Commits, tags, and pushes.
 
@@ -242,7 +224,7 @@ Fine-grained control:
 | `--no-tag` | Commit and push, but don't create a tag |
 | `--no-push` | Commit and tag locally, don't push |
 
-### 10. GitHub Release
+### 9. GitHub Release
 
 Creates (or updates) a GitHub release using `gh`.
 
@@ -260,6 +242,24 @@ Creates (or updates) a GitHub release using `gh`.
 
 Skip with `--no-release`.
 Override draft behavior with `--draft` / `--no-draft`.
+
+### 10. Publish
+
+Publishes to a package registry.
+Auto-detected:
+
+| Ecosystem | Default Command |
+|-----------|----------------|
+| Rust | `cargo publish` |
+| Node | `npm publish` |
+| Python | `twine upload dist/*` |
+| Ruby | `gem push` |
+| Go | (none — Go modules publish via `git push`) |
+| Swift | (none — Swift packages distribute via git URLs) |
+| PHP | (none — set `commands.publish` if needed) |
+
+Skip with `--no-publish`.
+Override with `commands.publish` in config.
 
 
 ## Commands
@@ -411,9 +411,9 @@ Declare them in config as lists of strings.
 | `pre_ship` / `post_ship` | Before/after the entire workflow |
 | `pre_test` / `post_test` | Before/after the test phase |
 | `pre_bump` / `post_bump` | Before/after version bump + changelog |
-| `pre_publish` / `post_publish` | Before/after registry publish |
 | `pre_tag` / `post_tag` | Before/after git commit + tag + push |
 | `pre_release` / `post_release` | Before/after GitHub release creation |
+| `pre_publish` / `post_publish` | Before/after registry publish |
 
 ### Variable Interpolation
 
