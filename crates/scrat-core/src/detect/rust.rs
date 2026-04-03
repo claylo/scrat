@@ -47,12 +47,10 @@ pub(super) fn detect_rust(
     }
 }
 
-/// Check which changelog tool is configured for this Rust project.
-fn detect_changelog_tool(project_root: &Utf8Path) -> Option<ChangelogTool> {
-    if project_root.join("cliff.toml").is_file() {
+/// Check which changelog tool is available for this project.
+fn detect_changelog_tool(_project_root: &Utf8Path) -> Option<ChangelogTool> {
+    if super::has_binary("git-cliff") {
         Some(ChangelogTool::GitCliff)
-    } else if project_root.join("cog.toml").is_file() {
-        Some(ChangelogTool::Cog)
     } else {
         None
     }
@@ -80,30 +78,24 @@ mod tests {
     }
 
     #[test]
-    fn rust_changelog_tool_cliff() {
+    fn rust_changelog_tool_when_git_cliff_available() {
         let tmp = TempDir::new().unwrap();
-        fs::write(tmp.path().join("cliff.toml"), "").unwrap();
-
-        assert_eq!(
-            detect_changelog_tool(utf8_tmp(&tmp)),
-            Some(ChangelogTool::GitCliff)
-        );
+        let tool = detect_changelog_tool(utf8_tmp(&tmp));
+        if super::has_binary("git-cliff") {
+            assert_eq!(tool, Some(ChangelogTool::GitCliff));
+        } else {
+            assert_eq!(tool, None);
+        }
     }
 
     #[test]
-    fn rust_changelog_tool_cog() {
+    fn rust_no_changelog_tool_when_nothing_available() {
         let tmp = TempDir::new().unwrap();
-        fs::write(tmp.path().join("cog.toml"), "").unwrap();
-
-        assert_eq!(
-            detect_changelog_tool(utf8_tmp(&tmp)),
-            Some(ChangelogTool::Cog)
-        );
-    }
-
-    #[test]
-    fn rust_no_changelog_tool() {
-        let tmp = TempDir::new().unwrap();
-        assert_eq!(detect_changelog_tool(utf8_tmp(&tmp)), None);
+        let tool = detect_changelog_tool(utf8_tmp(&tmp));
+        if super::has_binary("git-cliff") {
+            assert_eq!(tool, Some(ChangelogTool::GitCliff));
+        } else {
+            assert_eq!(tool, None);
+        }
     }
 }

@@ -42,12 +42,12 @@ That's it. scrat confirms before doing anything destructive. Everything below is
 Run `scrat info` in your project directory. scrat walks your working directory for marker files and probes your `PATH` for available tools:
 
 - **Ecosystem**: `Cargo.toml` → Rust, `package.json` → Node
-- **Version strategy**: `cliff.toml` → conventional commits via git-cliff, `cog.toml` → cocogitto, neither → interactive picker
+- **Version strategy**: `git-cliff` on PATH → conventional commits via git-cliff, otherwise → interactive picker
 - **Test command**: `cargo nextest run` if nextest is installed, `cargo test` otherwise
 - **Build command**: `cargo build --release`
 - **Publish command**: `cargo publish`
 - **Bump command**: `cargo set-version` (from cargo-edit)
-- **Changelog tool**: git-cliff or cog, if their config files exist
+- **Changelog tool**: git-cliff, if installed
 
 You can override any of these in a config file, but you probably don't need to. The defaults are solid.
 
@@ -176,7 +176,7 @@ scrat supports three ways to determine the next version:
 
 ### Conventional Commits (automatic)
 
-If you have a `cliff.toml` or `cog.toml` in your project root, scrat uses your commit messages to compute the next version:
+If `git-cliff` is installed, scrat uses your commit messages to compute the next version:
 
 - `fix:` commits → patch bump (0.0.X)
 - `feat:` commits → minor bump (0.X.0)
@@ -186,7 +186,7 @@ This is the zero-config path. Write conventional commits, and scrat figures out 
 
 ### Interactive
 
-If there's no `cliff.toml` or `cog.toml`, scrat shows you your recent commits and offers version candidates:
+If `git-cliff` is not installed, scrat shows you your recent commits and offers version candidates:
 
 ```
 Recent commits:

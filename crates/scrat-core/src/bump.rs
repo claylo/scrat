@@ -145,7 +145,15 @@ pub fn plan_bump(
             }))
         }
         VersionStrategy::ConventionalCommits { tool } => {
-            let next = conventional::compute_next_version(tool)?;
+            let cliff_config_override = config
+                .version
+                .as_ref()
+                .and_then(|v| v.cliff_config.as_deref());
+            let next = conventional::compute_next_version(
+                tool,
+                detection.ecosystem,
+                cliff_config_override,
+            )?;
             let previous = current_or_zero()?;
             Ok(BumpPlan::Ready(ReadyBump {
                 previous,
@@ -451,25 +459,6 @@ fn generate_changelog(
                 });
             }
         }
-        ChangelogTool::Cog => {
-            debug!("generating changelog via cog");
-            let output = Command::new("cog")
-                .arg("changelog")
-                .current_dir(project_root.as_std_path())
-                .output()
-                .map_err(|e| BumpError::ToolFailed {
-                    tool: "cog".into(),
-                    message: format!("failed to execute: {e}"),
-                })?;
-
-            if !output.status.success() {
-                let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
-                return Err(BumpError::ToolFailed {
-                    tool: "cog".into(),
-                    message: stderr,
-                });
-            }
-        }
     }
 
     Ok(())
@@ -545,6 +534,7 @@ mod tests {
         let config = Config {
             version: Some(crate::config::VersionConfig {
                 strategy: Some("conventional-commits".into()),
+                cliff_config: None,
             }),
             ..Config::default()
         };
@@ -556,16 +546,16 @@ mod tests {
                 build_cmd: String::new(),
                 publish_cmd: None,
                 bump_cmd: None,
-                changelog_tool: Some(ChangelogTool::Cog),
+                changelog_tool: Some(ChangelogTool::GitCliff),
             },
         };
 
         let strategy = resolve_strategy(&config, &detection);
-        // Should use detected tool (Cog)
+        // Should use detected tool (GitCliff)
         assert_eq!(
             strategy,
             VersionStrategy::ConventionalCommits {
-                tool: ChangelogTool::Cog
+                tool: ChangelogTool::GitCliff
             }
         );
     }
@@ -575,6 +565,7 @@ mod tests {
         let config = Config {
             version: Some(crate::config::VersionConfig {
                 strategy: Some("conventional-commits".into()),
+                cliff_config: None,
             }),
             ..Config::default()
         };
@@ -604,6 +595,7 @@ mod tests {
         let config = Config {
             version: Some(crate::config::VersionConfig {
                 strategy: Some("interactive".into()),
+                cliff_config: None,
             }),
             ..Config::default()
         };
@@ -618,6 +610,7 @@ mod tests {
         let config = Config {
             version: Some(crate::config::VersionConfig {
                 strategy: Some("unknown-thing".into()),
+                cliff_config: None,
             }),
             ..Config::default()
         };
@@ -657,7 +650,10 @@ mod tests {
     #[test]
     fn resolve_strategy_config_version_without_strategy_uses_detection() {
         let config = Config {
-            version: Some(crate::config::VersionConfig { strategy: None }),
+            version: Some(crate::config::VersionConfig {
+                strategy: None,
+                cliff_config: None,
+            }),
             ..Config::default()
         };
         let detection = rust_detection();
@@ -880,6 +876,7 @@ mod tests {
             }),
             version: Some(crate::config::VersionConfig {
                 strategy: Some("interactive".into()),
+                cliff_config: None,
             }),
             ..Config::default()
         };

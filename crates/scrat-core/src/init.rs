@@ -353,19 +353,22 @@ mod tests {
     }
 
     #[test]
-    fn plan_init_detects_cliff_toml() {
+    fn plan_init_detects_git_cliff_binary() {
         let tmp = TempDir::new().unwrap();
         fs::write(tmp.path().join("Cargo.toml"), "[package]\nname = \"test\"").unwrap();
-        fs::write(tmp.path().join("cliff.toml"), "").unwrap();
 
         let plan = plan_init(utf8_tmp(&tmp));
-        assert_eq!(
-            plan.version_strategy,
-            VersionStrategy::ConventionalCommits {
-                tool: ChangelogTool::GitCliff
-            }
-        );
-        assert_eq!(plan.changelog_tool, Some(ChangelogTool::GitCliff));
+        if crate::detect::has_binary("git-cliff") {
+            assert_eq!(
+                plan.version_strategy,
+                VersionStrategy::ConventionalCommits {
+                    tool: ChangelogTool::GitCliff
+                }
+            );
+            assert_eq!(plan.changelog_tool, Some(ChangelogTool::GitCliff));
+        } else {
+            assert_eq!(plan.version_strategy, VersionStrategy::Interactive);
+        }
     }
 
     #[test]

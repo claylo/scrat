@@ -9,7 +9,7 @@
 {{project_section}}
 
 # ─── Version Strategy ──────────────────────────────────────────────────────
-# Auto-detected from cliff.toml / cog.toml presence.
+# Auto-detected from git-cliff binary on PATH.
 # Override with:
 # version:
 #   strategy: conventional-commits  # or interactive, explicit

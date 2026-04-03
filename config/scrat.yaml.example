@@ -44,11 +44,12 @@ log_level: info
 #   release_branch: main    # auto-detected: main > master
 
 # ------------------------------------------------------------------------------
-# Version Strategy (auto-detected from cliff.toml / cog.toml)
+# Version Strategy (auto-detected from git-cliff binary on PATH)
 # ------------------------------------------------------------------------------
 
 # version:
 #   strategy: conventional-commits  # conventional-commits, interactive, explicit
+#   cliff_config: cliff.toml        # Use your own cliff.toml instead of scrat's built-in
 
 # ------------------------------------------------------------------------------
 # Command Overrides (smart defaults per ecosystem)
@@ -65,7 +66,7 @@ log_level: info
 # ------------------------------------------------------------------------------
 
 # release:
-#   changelog_tool: git-cliff   # or cog
+#   changelog_tool: git-cliff
 #   github_release: true
 #   assets:
 #     - release-card.png
