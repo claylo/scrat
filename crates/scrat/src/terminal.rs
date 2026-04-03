@@ -92,12 +92,14 @@ fn try_iterm2_render(png_bytes: &[u8]) -> Option<()> {
     }
 
     let encoded = STANDARD.encode(png_bytes);
+    let name = STANDARD.encode("shipit.png");
+    let size = png_bytes.len();
     let mut stdout = std::io::stdout().lock();
 
-    // width/height in character cells; preserveAspectRatio stretches to fit
+    // width/height in character cells; name/size populate iTerm2's security prompt
     let _ = write!(
         stdout,
-        "\x1b]1337;File=inline=1;width={IMG_COLS};height={IMG_ROWS}:{encoded}\x07"
+        "\x1b]1337;File=inline=1;width={IMG_COLS};height={IMG_ROWS};name={name};size={size}:{encoded}\x07"
     );
     let _ = writeln!(stdout);
     let _ = stdout.flush();

@@ -11,9 +11,14 @@ use std::fs;
 use tempfile::TempDir;
 
 /// Returns a Command configured to run our binary.
+///
+/// Sets HOME to a temp path so tests are isolated from real user config
+/// (e.g. ~/Library/Application Support/scrat/config.toml on macOS).
 #[allow(deprecated)]
 fn cmd() -> Command {
-    Command::cargo_bin(env!("CARGO_PKG_NAME")).unwrap()
+    let mut c = Command::cargo_bin(env!("CARGO_PKG_NAME")).unwrap();
+    c.env("HOME", std::env::temp_dir().join("scrat-test-home"));
+    c
 }
 
 /// Run `info --json` from a directory and parse the JSON output.

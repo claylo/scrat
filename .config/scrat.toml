@@ -1,0 +1,5 @@
+[project]
+type = "rust"
+
+[commands]
+test = "just test"
