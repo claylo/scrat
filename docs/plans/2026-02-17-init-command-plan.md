@@ -288,7 +288,7 @@ Create `crates/scrat-core/templates/init-documented.toml`:
 #   sync:   prefix = barrier (wait for prior, run alone, then continue)
 #   filter: prefix = sync + JSON stdin/stdout for pipeline mutation
 #
-# Phase order: pre_ship → test → bump → publish → git → release → post_ship
+# Phase order: pre_ship → test → bump → git → release → publish → post_ship
 #
 # Example:
 #
@@ -347,7 +347,7 @@ Create `crates/scrat-core/templates/init-documented.yaml`:
 #   sync:   prefix = barrier (wait for prior, run alone, then continue)
 #   filter: prefix = sync + JSON stdin/stdout for pipeline mutation
 #
-# Phase order: pre_ship → test → bump → publish → git → release → post_ship
+# Phase order: pre_ship → test → bump → git → release → publish → post_ship
 #
 # Example:
 #

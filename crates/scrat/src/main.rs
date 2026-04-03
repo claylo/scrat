@@ -9,7 +9,17 @@ use tracing::debug;
 
 use scrat_core::observability;
 
-fn main() -> anyhow::Result<()> {
+fn main() {
+    if let Err(err) = run() {
+        eprintln!("Error: {err}");
+        err.chain().skip(1).for_each(|cause| {
+            eprintln!("\nCaused by:\n    {cause}");
+        });
+        std::process::exit(1);
+    }
+}
+
+fn run() -> anyhow::Result<()> {
     // Use scrat::command() which adds the custom -h/--help flag back
     // (Cli derive has disable_help_flag = true so we can use HelpShort).
     // Intercept --version to render the :shipit: squirrel before the version string.

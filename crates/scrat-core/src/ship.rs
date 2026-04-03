@@ -553,52 +553,6 @@ impl ReadyShip {
             &mut ctx,
         )?;
 
-        // ── Publish Phase ──
-        hooks_run += run_phase_hooks(
-            hooks_config.and_then(|h| h.pre_publish.as_deref()),
-            &hook_ctx,
-            project_root,
-            ShipPhase::Publish,
-            is_dry,
-            &mut on_event,
-            &mut ctx,
-        )?;
-
-        on_event(ShipEvent::PhaseStarted(ShipPhase::Publish));
-        let publish_outcome = if self.options.no_publish {
-            PhaseOutcome::Skipped {
-                reason: "--no-publish flag".into(),
-            }
-        } else if is_dry {
-            let publish_cmd = self
-                .config
-                .commands
-                .as_ref()
-                .and_then(|c| c.publish.as_deref())
-                .or(self.detection.tools.publish_cmd.as_deref())
-                .unwrap_or("(no publish command)");
-            PhaseOutcome::Success {
-                message: format!("Would run: {publish_cmd}"),
-            }
-        } else {
-            run_publish_phase(project_root, &self.config, &self.detection)?
-        };
-        on_event(ShipEvent::PhaseCompleted(
-            ShipPhase::Publish,
-            publish_outcome.clone(),
-        ));
-        phases.push((ShipPhase::Publish, publish_outcome));
-
-        hooks_run += run_phase_hooks(
-            hooks_config.and_then(|h| h.post_publish.as_deref()),
-            &hook_ctx,
-            project_root,
-            ShipPhase::Publish,
-            is_dry,
-            &mut on_event,
-            &mut ctx,
-        )?;
-
         // ── Git Phase (commit + tag + push) ──
         if !self.options.no_git {
             hooks_run += run_phase_hooks(
@@ -810,6 +764,52 @@ impl ReadyShip {
             &hook_ctx,
             project_root,
             ShipPhase::Release,
+            is_dry,
+            &mut on_event,
+            &mut ctx,
+        )?;
+
+        // ── Publish Phase ──
+        hooks_run += run_phase_hooks(
+            hooks_config.and_then(|h| h.pre_publish.as_deref()),
+            &hook_ctx,
+            project_root,
+            ShipPhase::Publish,
+            is_dry,
+            &mut on_event,
+            &mut ctx,
+        )?;
+
+        on_event(ShipEvent::PhaseStarted(ShipPhase::Publish));
+        let publish_outcome = if self.options.no_publish {
+            PhaseOutcome::Skipped {
+                reason: "--no-publish flag".into(),
+            }
+        } else if is_dry {
+            let publish_cmd = self
+                .config
+                .commands
+                .as_ref()
+                .and_then(|c| c.publish.as_deref())
+                .or(self.detection.tools.publish_cmd.as_deref())
+                .unwrap_or("(no publish command)");
+            PhaseOutcome::Success {
+                message: format!("Would run: {publish_cmd}"),
+            }
+        } else {
+            run_publish_phase(project_root, &self.config, &self.detection)?
+        };
+        on_event(ShipEvent::PhaseCompleted(
+            ShipPhase::Publish,
+            publish_outcome.clone(),
+        ));
+        phases.push((ShipPhase::Publish, publish_outcome));
+
+        hooks_run += run_phase_hooks(
+            hooks_config.and_then(|h| h.post_publish.as_deref()),
+            &hook_ctx,
+            project_root,
+            ShipPhase::Publish,
             is_dry,
             &mut on_event,
             &mut ctx,
