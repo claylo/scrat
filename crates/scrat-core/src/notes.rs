@@ -325,6 +325,9 @@ pub fn build_extra(ctx: &PipelineContext) -> serde_json::Value {
         );
     }
 
+    // Repo name (for templates that reference extra.repo)
+    extra.insert("repo".into(), serde_json::Value::String(ctx.repo.clone()));
+
     // Metadata
     if !ctx.metadata.is_empty() {
         extra.insert(
@@ -525,6 +528,9 @@ mod tests {
         assert_eq!(deps[1]["from"], serde_json::Value::Null);
         assert_eq!(deps[1]["to"], "1.0.0");
 
+        // Repo always present
+        assert_eq!(obj["repo"], "scrat");
+
         // Metadata present
         assert!(obj.contains_key("metadata"));
         assert_eq!(obj["metadata"]["custom"], "value");
@@ -540,10 +546,11 @@ mod tests {
         let extra = build_extra(&ctx);
         let obj = extra.as_object().unwrap();
 
-        // No stats, deps, or metadata when empty
+        // Only repo when no stats/deps/metadata
         assert!(!obj.contains_key("stats"));
         assert!(!obj.contains_key("deps"));
         assert!(!obj.contains_key("metadata"));
+        assert_eq!(obj["repo"], "scrat");
     }
 
     // ──────────────────────────────────────────────
@@ -628,6 +635,7 @@ mod tests {
         // The extra field should be injected
         let release = &parsed[0];
         assert!(release["extra"].is_object());
+        assert_eq!(release["extra"]["repo"], "scrat");
         assert_eq!(release["extra"]["stats"]["files_changed"], 3);
         assert_eq!(release["extra"]["stats"]["contributors"][0]["name"], "Clay");
     }
@@ -685,6 +693,7 @@ mod tests {
         let extra = build_extra(&ctx);
         let obj = extra.as_object().unwrap();
         assert!(obj.contains_key("stats"));
+        assert!(obj.contains_key("repo"));
         assert!(!obj.contains_key("deps"));
         assert!(!obj.contains_key("metadata"));
     }
@@ -700,6 +709,7 @@ mod tests {
         let obj = extra.as_object().unwrap();
         assert!(!obj.contains_key("stats"));
         assert!(!obj.contains_key("deps"));
+        assert!(obj.contains_key("repo"));
         assert!(obj.contains_key("metadata"));
         assert_eq!(obj["metadata"]["key"], "val");
     }
@@ -721,6 +731,7 @@ mod tests {
         let obj = extra.as_object().unwrap();
         assert!(!obj.contains_key("stats"));
         assert!(obj.contains_key("deps"));
+        assert!(obj.contains_key("repo"));
         assert!(!obj.contains_key("metadata"));
         assert_eq!(obj["deps"].as_array().unwrap().len(), 1);
     }
@@ -1000,8 +1011,9 @@ mod tests {
         assert_eq!(release["statistics"]["commit_count"], 1);
         assert_eq!(release["custom_field"], "should survive");
 
-        // extra injected (empty because ctx has no stats/deps/metadata)
+        // extra injected (repo always present, no stats/deps/metadata)
         assert!(release["extra"].is_object());
+        assert_eq!(release["extra"]["repo"], "scrat");
     }
 
     // ──────────────────────────────────────────────
@@ -1077,9 +1089,10 @@ mod tests {
         let result = inject_extra(&cliff_json, &ctx).unwrap();
         let parsed: serde_json::Value = serde_json::from_str(&result).unwrap();
 
-        // extra should be an empty object (not absent)
+        // extra should contain only repo (no stats/deps/metadata)
         assert!(parsed[0]["extra"].is_object());
-        assert_eq!(parsed[0]["extra"].as_object().unwrap().len(), 0);
+        assert_eq!(parsed[0]["extra"].as_object().unwrap().len(), 1);
+        assert_eq!(parsed[0]["extra"]["repo"], "scrat");
     }
 
     // ──────────────────────────────────────────────
@@ -1525,9 +1538,14 @@ mod tests {
 
         let extra = build_extra(&ctx);
         let obj = extra.as_object().unwrap();
-        assert_eq!(obj.len(), 3, "should have exactly stats, deps, metadata");
+        assert_eq!(
+            obj.len(),
+            4,
+            "should have exactly stats, deps, repo, metadata"
+        );
         assert!(obj.contains_key("stats"));
         assert!(obj.contains_key("deps"));
+        assert!(obj.contains_key("repo"));
         assert!(obj.contains_key("metadata"));
     }
 

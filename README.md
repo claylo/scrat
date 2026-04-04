@@ -319,6 +319,14 @@ scrat info                    # human-readable
 scrat info --json             # machine-readable
 ```
 
+### `scrat init`
+
+Generates a scrat config file for a project.
+
+```bash
+scrat init                    # interactive — asks for ecosystem, version strategy
+```
+
 ### `scrat doctor`
 
 Diagnoses configuration and environment issues.
@@ -406,7 +414,7 @@ Declare them in config as lists of strings.
 
 ### Hook Points
 
-14 hook points across 7 phases:
+12 hook points across 6 phases:
 
 | Hook | When |
 |------|------|
@@ -549,18 +557,8 @@ cargo install scrat
 
 ### Shell Completions
 
-Included in release archives and Homebrew installs. For manual setup:
-
-```bash
-# Bash
-scrat completions bash > ~/.local/share/bash-completion/completions/scrat
-
-# Zsh
-scrat completions zsh > ~/.zfunc/_scrat
-
-# Fish
-scrat completions fish > ~/.config/fish/completions/scrat.fish
-```
+Shell completions for Bash, Zsh, and Fish are included in release archives and Homebrew installs.
+They are generated at build time via `xtask`, not a runtime subcommand.
 
 ### Prerequisites
 

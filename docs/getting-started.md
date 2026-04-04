@@ -152,7 +152,7 @@ scrat ship --no-push
 scrat ship --no-release
 
 # Skip tests (you just ran them, or you're feeling lucky)
-scrat ship --skip-tests
+scrat ship --no-test
 
 # Skip changelog generation
 scrat ship --no-changelog
@@ -398,7 +398,7 @@ scrat shows you the version, which phases will run, and how many hooks are confi
 - Create a GitHub release
 - Publish to crates.io
 
-**4. If something goes wrong**
+**3. If something goes wrong**
 
 If a phase fails, scrat stops immediately. No partial state. Here's what to do:
 
