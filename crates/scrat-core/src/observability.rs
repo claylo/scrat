@@ -29,9 +29,9 @@ pub struct ObservabilityConfig {
 
 impl ObservabilityConfig {
     /// Create config from environment variables with optional overrides.
-    pub fn from_env_with_overrides(log_dir: Option<PathBuf>) -> Self {
+    pub fn from_env_with_overrides(service: &str, log_dir: Option<PathBuf>) -> Self {
         Self {
-            service: env!("CARGO_PKG_NAME").to_string(),
+            service: service.to_string(),
             log_dir,
         }
     }
@@ -193,9 +193,12 @@ where
         event.record(&mut visitor);
         map.extend(visitor.values);
 
-        let mut writer = self.writer.make_writer();
-        if serde_json::to_writer(&mut writer, &Value::Object(map)).is_ok() {
-            let _ = writer.write_all(b"\n");
+        // Buffer the entire line so it's written in a single write() syscall,
+        // which is atomic with O_APPEND for lines under PIPE_BUF (typically 4096).
+        if let Ok(mut buf) = serde_json::to_vec(&Value::Object(map)) {
+            buf.push(b'\n');
+            let mut writer = self.writer.make_writer();
+            let _ = writer.write_all(&buf);
         }
     }
 }
@@ -354,9 +357,9 @@ fn resolve_log_target_with(
         candidates.push(PathBuf::from(DEFAULT_LOG_DIR_UNIX));
     }
 
-    // Use XDG-compliant data directory for log storage
-    if let Some(proj_dirs) = directories::ProjectDirs::from("", "", service) {
-        candidates.push(proj_dirs.data_local_dir().join("logs"));
+    // Platform-appropriate log directory
+    if let Some(log_dir) = platform_log_dir(service) {
+        candidates.push(log_dir);
     }
 
     if let Ok(dir) = std::env::current_dir() {
@@ -411,6 +414,26 @@ fn ensure_writable(dir: &Path, file_name: &str) -> Result<(), String> {
         .map_err(|e| format!("Failed to open log file {}: {e}", path.display()))?;
 
     Ok(())
+}
+
+/// Resolve the platform-appropriate log directory for a service.
+///
+/// - macOS: `~/Library/Logs/{service}/`
+/// - Linux/BSD: `$XDG_STATE_HOME/{service}/logs/` (default `~/.local/state/{service}/logs/`)
+/// - Windows: `{LocalAppData}/{service}/logs/` (via `directories` crate)
+fn platform_log_dir(service: &str) -> Option<PathBuf> {
+    if cfg!(target_os = "macos") {
+        std::env::var_os("HOME").map(|home| PathBuf::from(home).join("Library/Logs").join(service))
+    } else if cfg!(unix) {
+        let state_base = std::env::var_os("XDG_STATE_HOME")
+            .map(PathBuf::from)
+            .or_else(|| {
+                std::env::var_os("HOME").map(|home| PathBuf::from(home).join(".local/state"))
+            })?;
+        Some(state_base.join(service).join("logs"))
+    } else {
+        directories::ProjectDirs::from("", "", service).map(|p| p.data_local_dir().join("logs"))
+    }
 }
 
 // ============================================================================
@@ -494,6 +517,27 @@ mod tests {
         assert_eq!(&ts[4..5], "-", "year-month separator");
         assert_eq!(&ts[7..8], "-", "month-day separator");
         assert_eq!(&ts[10..11], "T", "date-time separator");
+    }
+
+    #[test]
+    fn platform_log_dir_contains_service_name() {
+        let dir = platform_log_dir("test-svc").expect("platform_log_dir should return Some");
+        let path = dir.to_str().expect("path should be valid UTF-8");
+        assert!(
+            path.contains("test-svc"),
+            "log dir should contain service name: {path}"
+        );
+    }
+
+    #[test]
+    #[cfg(target_os = "macos")]
+    fn platform_log_dir_uses_library_logs_on_macos() {
+        let dir = platform_log_dir("test-svc").unwrap();
+        let path = dir.to_str().unwrap();
+        assert!(
+            path.contains("Library/Logs"),
+            "macOS log dir should use ~/Library/Logs/: {path}"
+        );
     }
 
     #[test]

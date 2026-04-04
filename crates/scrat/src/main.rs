@@ -72,6 +72,7 @@ fn run() -> anyhow::Result<()> {
     let (config, config_sources) = loader.load().context("failed to load configuration")?;
 
     let obs_config = observability::ObservabilityConfig::from_env_with_overrides(
+        env!("CARGO_PKG_NAME"),
         config
             .log_dir
             .as_ref()
