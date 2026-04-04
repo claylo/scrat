@@ -404,6 +404,20 @@ log_level = "info"
 # Prompt for confirmation before executing (default: true)
 # Set to false for CI/scripted use. --yes/-y flag also skips.
 # confirm = true
+
+# Skip pipeline phases permanently (equivalent to --no-* CLI flags).
+# CLI flags override these — passing --no-publish on a run where
+# no_publish is already true in config is harmless.
+# no_changelog = false
+# no_publish = false
+# no_push = false
+# no_release = false
+# no_deps = false
+# no_stats = false
+# no_notes = false
+# no_test = false
+# no_tag = false
+# no_git = false
 ```
 
 

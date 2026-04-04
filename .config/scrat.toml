@@ -3,3 +3,6 @@ type = "rust"
 
 [commands]
 test = "just test"
+
+[ship]
+no_publish = true
