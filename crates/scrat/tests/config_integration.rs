@@ -16,9 +16,14 @@ use tempfile::TempDir;
 /// (e.g. ~/Library/Application Support/scrat/config.toml on macOS).
 #[allow(deprecated)]
 fn cmd() -> Command {
-    let mut c = Command::cargo_bin(env!("CARGO_PKG_NAME")).unwrap();
-    c.env("HOME", std::env::temp_dir().join("scrat-test-home"));
-    c
+    let mut cmd = Command::cargo_bin(env!("CARGO_PKG_NAME")).unwrap();
+    // Isolate from real user config (e.g. ~/Library/Application Support/scrat/config.toml)
+    cmd.env("HOME", std::env::temp_dir().join("scrat-test-home"));
+    // Route log output to a temp directory so tests don't write to production paths
+    let prefix = env!("CARGO_PKG_NAME").to_uppercase().replace('-', "_");
+    let test_log_dir = std::env::temp_dir().join(format!("{}-test-logs", env!("CARGO_PKG_NAME")));
+    cmd.env(format!("{prefix}_LOG_DIR"), test_log_dir);
+    cmd
 }
 
 /// Run `info --json` from a directory and parse the JSON output.
