@@ -140,6 +140,31 @@ pub fn cmd_ship(
         }
     };
 
+    // Post-version validation (tag existence, etc.)
+    let validation_failures = ready.validate();
+    if !validation_failures.is_empty() {
+        if global_json {
+            let json = serde_json::to_string_pretty(&validation_failures)?;
+            println!("{json}");
+        } else {
+            for check in &validation_failures {
+                let hint = check
+                    .skip_flag
+                    .as_ref()
+                    .map(|f| format!(" (skip with {f})"))
+                    .unwrap_or_default();
+                eprintln!(
+                    "  {} {}: {}{}",
+                    "✗".red(),
+                    check.name.bold(),
+                    check.message,
+                    hint.dimmed(),
+                );
+            }
+        }
+        bail!("validation failed — fix issues above before releasing");
+    }
+
     // Display the plan header
     if !global_json {
         if is_dry {

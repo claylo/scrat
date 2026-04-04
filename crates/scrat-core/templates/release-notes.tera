@@ -5,9 +5,25 @@
 {%- else -%}
 ## Unreleased
 {%- endif %}{% if timestamp %} — {{ timestamp | date(format="%Y-%m-%d") }}{% endif %}
+{%- if extra and extra.metadata and extra.metadata.codename %} — *{{ extra.metadata.codename }}*{% endif %}
 {% if previous and previous.version and version %}
 [Compare](../compare/{{ previous.version }}...{{ version }})
 {% endif %}
+{# ── Editorial: quote + TL;DR ── #}
+{% if extra and extra.metadata -%}
+{% if extra.metadata.quote -%}
+> {{ extra.metadata.quote }}
+> — *{{ extra.metadata.quote_author | default(value="Unknown") }}*
+
+{% endif -%}
+{% if extra.metadata.tldrs and extra.metadata.tldrs | length > 0 -%}
+**TL;DR**
+{% for bullet in extra.metadata.tldrs %}
+- {{ bullet }}
+{%- endfor %}
+
+{% endif -%}
+{% endif -%}
 {# ── Breaking changes ── #}
 {% set breaking_commits = commits | filter(attribute="breaking", value=true) -%}
 {% if breaking_commits | length > 0 %}

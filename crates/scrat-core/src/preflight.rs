@@ -8,8 +8,9 @@ use tracing::{debug, instrument};
 
 use crate::config::Config;
 use crate::detect;
-use crate::ecosystem::ProjectDetection;
+use crate::ecosystem::{Ecosystem, ProjectDetection};
 use crate::git;
+use crate::ship::ShipOptions;
 
 /// A single preflight check result.
 #[derive(Debug, Clone, Serialize)]
@@ -20,6 +21,10 @@ pub struct CheckResult {
     pub passed: bool,
     /// Description of the result (reason for failure, or confirmation).
     pub message: String,
+    /// CLI flag that would skip this check (e.g., `"--no-publish"`).
+    /// Shown as a hint when the check fails.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub skip_flag: Option<String>,
 }
 
 /// Full preflight report.
@@ -38,8 +43,14 @@ pub struct PreflightReport {
 /// # Arguments
 /// * `project_root` — the project root directory
 /// * `config` — loaded scrat configuration (for branch overrides etc.)
-#[instrument(skip(config), fields(root = %project_root))]
-pub fn run_preflight(project_root: &camino::Utf8Path, config: &Config) -> PreflightReport {
+/// * `ship_options` — if provided, gates credential checks on which phases
+///   will actually run. `None` means check everything (standalone preflight).
+#[instrument(skip(config, ship_options), fields(root = %project_root))]
+pub fn run_preflight(
+    project_root: &camino::Utf8Path,
+    config: &Config,
+    ship_options: Option<&ShipOptions>,
+) -> PreflightReport {
     let mut checks = Vec::new();
 
     // Check 1: Inside a git repo
@@ -78,6 +89,27 @@ pub fn run_preflight(project_root: &camino::Utf8Path, config: &Config) -> Prefli
         checks.push(check_required_tools(det));
     }
 
+    // ── Extended checks: credentials & auth ──
+    // These validate that later pipeline phases can succeed.
+    // When ship_options is None (standalone `scrat preflight`), assume
+    // all phases will run and check everything.
+
+    let skip_release = ship_options.is_some_and(|o| o.no_release);
+    let skip_publish = ship_options.is_some_and(|o| o.no_publish);
+
+    // Check 7: GitHub CLI auth (needed for release phase)
+    if !skip_release {
+        checks.push(check_gh_auth());
+    }
+
+    // Check 8: Registry auth (needed for publish phase, ecosystem-specific)
+    if !skip_publish
+        && let Some(ref det) = detection
+        && det.tools.publish_cmd.is_some()
+    {
+        checks.push(check_registry_auth(det.ecosystem));
+    }
+
     let all_passed = checks.iter().all(|c| c.passed);
     debug!(all_passed, check_count = checks.len(), "preflight complete");
 
@@ -94,16 +126,19 @@ fn check_git_repo() -> CheckResult {
             name: "Git repository".into(),
             passed: true,
             message: "Inside a git repository".into(),
+            skip_flag: None,
         },
         Ok(false) => CheckResult {
             name: "Git repository".into(),
             passed: false,
             message: "Not inside a git repository".into(),
+            skip_flag: None,
         },
         Err(e) => CheckResult {
             name: "Git repository".into(),
             passed: false,
             message: format!("Failed to check: {e}"),
+            skip_flag: None,
         },
     }
 }
@@ -114,16 +149,19 @@ fn check_clean_tree() -> CheckResult {
             name: "Working tree".into(),
             passed: true,
             message: "Clean working tree".into(),
+            skip_flag: None,
         },
         Ok(false) => CheckResult {
             name: "Working tree".into(),
             passed: false,
             message: "Uncommitted changes in working tree".into(),
+            skip_flag: None,
         },
         Err(e) => CheckResult {
             name: "Working tree".into(),
             passed: false,
             message: format!("Failed to check: {e}"),
+            skip_flag: None,
         },
     }
 }
@@ -136,6 +174,7 @@ fn check_release_branch(override_branch: Option<&str>) -> CheckResult {
                 name: "Release branch".into(),
                 passed: false,
                 message: "Detached HEAD — not on any branch".into(),
+                skip_flag: None,
             };
         }
         Err(e) => {
@@ -143,6 +182,7 @@ fn check_release_branch(override_branch: Option<&str>) -> CheckResult {
                 name: "Release branch".into(),
                 passed: false,
                 message: format!("Failed to check: {e}"),
+                skip_flag: None,
             };
         }
     };
@@ -158,6 +198,7 @@ fn check_release_branch(override_branch: Option<&str>) -> CheckResult {
             } else {
                 format!("On '{current}', expected '{expected}'")
             },
+            skip_flag: None,
         };
     }
 
@@ -173,17 +214,20 @@ fn check_release_branch(override_branch: Option<&str>) -> CheckResult {
                 } else {
                     format!("On '{current}', expected '{release}'")
                 },
+                skip_flag: None,
             }
         }
         Ok(None) => CheckResult {
             name: "Release branch".into(),
             passed: false,
             message: format!("On '{current}' — no main/master branch found"),
+            skip_flag: None,
         },
         Err(e) => CheckResult {
             name: "Release branch".into(),
             passed: false,
             message: format!("Failed to detect: {e}"),
+            skip_flag: None,
         },
     }
 }
@@ -194,16 +238,19 @@ fn check_remote_sync() -> CheckResult {
             name: "Remote sync".into(),
             passed: true,
             message: "Local branch is in sync with remote".into(),
+            skip_flag: None,
         },
         Ok(false) => CheckResult {
             name: "Remote sync".into(),
             passed: false,
             message: "Local branch is out of sync with remote (pull or push needed)".into(),
+            skip_flag: None,
         },
         Err(e) => CheckResult {
             name: "Remote sync".into(),
             passed: false,
             message: format!("Failed to check: {e}"),
+            skip_flag: None,
         },
     }
 }
@@ -216,11 +263,13 @@ fn check_ecosystem(detection: &Option<ProjectDetection>) -> CheckResult {
             passed: true,
             message: "No ecosystem detected — select interactively or set project.type in config"
                 .into(),
+            skip_flag: None,
         },
         |det| CheckResult {
             name: "Project detection".into(),
             passed: true,
             message: format!("Detected {} project", det.ecosystem),
+            skip_flag: None,
         },
     )
 }
@@ -256,6 +305,7 @@ fn check_required_tools(detection: &ProjectDetection) -> CheckResult {
             name: "Required tools".into(),
             passed: false,
             message: format!("Missing tools: {}", missing.join(", ")),
+            skip_flag: None,
         };
     }
 
@@ -272,6 +322,7 @@ fn check_required_tools(detection: &ProjectDetection) -> CheckResult {
                     message: format!(
                         "git-cliff {found} is too old (need {minimum}+) — run `cargo install git-cliff`"
                     ),
+                    skip_flag: None,
                 };
             }
             detect::ToolVersionCheck::Unknown(reason) => {
@@ -284,6 +335,129 @@ fn check_required_tools(detection: &ProjectDetection) -> CheckResult {
         name: "Required tools".into(),
         passed: true,
         message: "All required tools are installed".into(),
+        skip_flag: None,
+    }
+}
+
+// ── Extended checks: credentials & auth ──────────────
+
+/// Check GitHub CLI authentication status.
+///
+/// Runs `gh auth status` which exits 0 when a valid token is configured.
+fn check_gh_auth() -> CheckResult {
+    if !detect::has_binary("gh") {
+        return CheckResult {
+            name: "GitHub CLI".into(),
+            passed: false,
+            message: "gh not found on PATH — install from https://cli.github.com/".into(),
+            skip_flag: Some("--no-release".into()),
+        };
+    }
+
+    let result = std::process::Command::new("gh")
+        .args(["auth", "status"])
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status();
+
+    match result {
+        Ok(status) if status.success() => CheckResult {
+            name: "GitHub CLI".into(),
+            passed: true,
+            message: "gh is authenticated".into(),
+            skip_flag: None,
+        },
+        _ => CheckResult {
+            name: "GitHub CLI".into(),
+            passed: false,
+            message: "gh is not authenticated — run `gh auth login`".into(),
+            skip_flag: Some("--no-release".into()),
+        },
+    }
+}
+
+/// Check registry auth for ecosystems that publish to a package registry.
+///
+/// Uses fast env-var checks (no network calls). The check is informational:
+/// some ecosystems support credential stores that env vars don't cover,
+/// so a missing env var is a warning-level failure.
+fn check_registry_auth(ecosystem: Ecosystem) -> CheckResult {
+    let (env_vars, registry_name, login_hint) = match ecosystem {
+        Ecosystem::Rust => (
+            vec!["CARGO_REGISTRY_TOKEN"],
+            "crates.io",
+            "set CARGO_REGISTRY_TOKEN or run `cargo login`",
+        ),
+        Ecosystem::Node => (
+            vec!["NPM_TOKEN", "NODE_AUTH_TOKEN"],
+            "npm",
+            "set NPM_TOKEN or run `npm login`",
+        ),
+        Ecosystem::Python => (
+            vec!["TWINE_PASSWORD", "PYPI_TOKEN"],
+            "PyPI",
+            "set TWINE_PASSWORD or PYPI_TOKEN",
+        ),
+        Ecosystem::Ruby => (
+            vec!["GEM_HOST_API_KEY"],
+            "RubyGems",
+            "set GEM_HOST_API_KEY or run `gem signin`",
+        ),
+        // Ecosystems without registry publish
+        _ => {
+            return CheckResult {
+                name: "Registry auth".into(),
+                passed: true,
+                message: "No registry publish for this ecosystem".into(),
+                skip_flag: None,
+            };
+        }
+    };
+
+    let found = env_vars.iter().any(|v| std::env::var(v).is_ok());
+
+    if found {
+        CheckResult {
+            name: "Registry auth".into(),
+            passed: true,
+            message: format!("{registry_name} credentials found"),
+            skip_flag: None,
+        }
+    } else {
+        let vars = env_vars.join(" or ");
+        CheckResult {
+            name: "Registry auth".into(),
+            passed: false,
+            message: format!("{vars} not set — {login_hint}"),
+            skip_flag: Some("--no-publish".into()),
+        }
+    }
+}
+
+/// Check whether a specific git tag already exists.
+///
+/// This is a post-version-resolution check, called from [`ReadyShip::validate`]
+/// rather than from `run_preflight` (which runs before the version is known).
+pub fn check_tag_available(tag: &str) -> CheckResult {
+    match git::tag_exists(tag) {
+        Ok(false) => CheckResult {
+            name: "Tag available".into(),
+            passed: true,
+            message: format!("{tag} does not exist"),
+            skip_flag: None,
+        },
+        Ok(true) => CheckResult {
+            name: "Tag available".into(),
+            passed: false,
+            message: format!("{tag} already exists — delete it or choose a different version"),
+            skip_flag: Some("--no-tag".into()),
+        },
+        Err(e) => CheckResult {
+            name: "Tag available".into(),
+            passed: false,
+            message: format!("Failed to check tag: {e}"),
+            skip_flag: None,
+        },
     }
 }
 
@@ -437,6 +611,7 @@ mod tests {
             name: "My Check".into(),
             passed: true,
             message: "Everything is fine".into(),
+            skip_flag: None,
         };
         assert_eq!(result.name, "My Check");
         assert!(result.passed);
@@ -449,6 +624,7 @@ mod tests {
             name: "test".into(),
             passed: false,
             message: "fail".into(),
+            skip_flag: None,
         };
         let cloned = result.clone();
         assert_eq!(cloned.name, result.name);
@@ -462,6 +638,7 @@ mod tests {
             name: "test".into(),
             passed: true,
             message: "ok".into(),
+            skip_flag: None,
         };
         let debug = format!("{result:?}");
         assert!(debug.contains("CheckResult"));
@@ -478,6 +655,7 @@ mod tests {
             name: "Git repository".into(),
             passed: true,
             message: "Inside a git repository".into(),
+            skip_flag: None,
         };
         let json = serde_json::to_string(&result).unwrap();
         assert!(json.contains("\"name\":\"Git repository\""));
@@ -491,6 +669,7 @@ mod tests {
             name: "Working tree".into(),
             passed: false,
             message: "Uncommitted changes".into(),
+            skip_flag: None,
         };
         let json = serde_json::to_string(&result).unwrap();
         assert!(json.contains("\"passed\":false"));
@@ -507,6 +686,7 @@ mod tests {
                 name: "test".into(),
                 passed: true,
                 message: "ok".into(),
+                skip_flag: None,
             }],
             all_passed: true,
             detection: None,
@@ -523,6 +703,7 @@ mod tests {
                 name: "test".into(),
                 passed: true,
                 message: "ok".into(),
+                skip_flag: None,
             }],
             all_passed: true,
             detection: Some(det),
@@ -575,11 +756,13 @@ mod tests {
                     name: "check1".into(),
                     passed: true,
                     message: "ok".into(),
+                    skip_flag: None,
                 },
                 CheckResult {
                     name: "check2".into(),
                     passed: false,
                     message: "fail".into(),
+                    skip_flag: None,
                 },
             ],
             all_passed: false,
@@ -596,16 +779,19 @@ mod tests {
                     name: "a".into(),
                     passed: true,
                     message: "ok".into(),
+                    skip_flag: None,
                 },
                 CheckResult {
                     name: "b".into(),
                     passed: false,
                     message: "nope".into(),
+                    skip_flag: None,
                 },
                 CheckResult {
                     name: "c".into(),
                     passed: true,
                     message: "fine".into(),
+                    skip_flag: None,
                 },
             ],
             all_passed: false,
@@ -624,6 +810,7 @@ mod tests {
                 name: "test".into(),
                 passed: true,
                 message: "ok".into(),
+                skip_flag: None,
             }],
             all_passed: true,
             detection: Some(detection_for(Ecosystem::Rust)),
@@ -900,7 +1087,7 @@ mod tests {
         let original_dir = std::env::current_dir().unwrap();
         std::env::set_current_dir(tmp.path()).unwrap();
 
-        let report = run_preflight(utf8_tmp(&tmp), &config);
+        let report = run_preflight(utf8_tmp(&tmp), &config, None);
 
         std::env::set_current_dir(original_dir).unwrap();
 
@@ -940,7 +1127,7 @@ mod tests {
         let original_dir = std::env::current_dir().unwrap();
         std::env::set_current_dir(tmp.path()).unwrap();
 
-        let report = run_preflight(utf8_tmp(&tmp), &config);
+        let report = run_preflight(utf8_tmp(&tmp), &config, None);
 
         std::env::set_current_dir(original_dir).unwrap();
 
@@ -961,7 +1148,7 @@ mod tests {
         let original_dir = std::env::current_dir().unwrap();
         std::env::set_current_dir(tmp.path()).unwrap();
 
-        let report = run_preflight(utf8_tmp(&tmp), &config);
+        let report = run_preflight(utf8_tmp(&tmp), &config, None);
 
         std::env::set_current_dir(original_dir).unwrap();
 
@@ -990,7 +1177,7 @@ mod tests {
         let original_dir = std::env::current_dir().unwrap();
         std::env::set_current_dir(tmp.path()).unwrap();
 
-        let report = run_preflight(utf8_tmp(&tmp), &config);
+        let report = run_preflight(utf8_tmp(&tmp), &config, None);
 
         std::env::set_current_dir(original_dir).unwrap();
 
@@ -1016,7 +1203,7 @@ mod tests {
         let original_dir = std::env::current_dir().unwrap();
         std::env::set_current_dir(tmp.path()).unwrap();
 
-        let report = run_preflight(utf8_tmp(&tmp), &config);
+        let report = run_preflight(utf8_tmp(&tmp), &config, None);
 
         std::env::set_current_dir(original_dir).unwrap();
 
@@ -1038,7 +1225,7 @@ mod tests {
         let original_dir = std::env::current_dir().unwrap();
         std::env::set_current_dir(tmp.path()).unwrap();
 
-        let report = run_preflight(utf8_tmp(&tmp), &config);
+        let report = run_preflight(utf8_tmp(&tmp), &config, None);
 
         std::env::set_current_dir(original_dir).unwrap();
 
@@ -1074,7 +1261,7 @@ mod tests {
         let original_dir = std::env::current_dir().unwrap();
         std::env::set_current_dir(tmp.path()).unwrap();
 
-        let report = run_preflight(utf8_tmp(&tmp), &config);
+        let report = run_preflight(utf8_tmp(&tmp), &config, None);
 
         std::env::set_current_dir(original_dir).unwrap();
 
@@ -1109,13 +1296,14 @@ mod tests {
         let original_dir = std::env::current_dir().unwrap();
         std::env::set_current_dir(tmp.path()).unwrap();
 
-        let report = run_preflight(utf8_tmp(&tmp), &config);
+        let report = run_preflight(utf8_tmp(&tmp), &config, None);
 
         std::env::set_current_dir(original_dir).unwrap();
 
-        // When detection succeeds: git repo, clean tree, release branch,
-        // remote sync, ecosystem, required tools = 6 checks
-        assert_eq!(report.checks.len(), 6);
+        // When detection succeeds (standalone, None ship_options):
+        // git repo, clean tree, release branch, remote sync, ecosystem,
+        // required tools, gh auth, registry auth = 8 checks
+        assert_eq!(report.checks.len(), 8);
     }
 
     #[test]
@@ -1129,13 +1317,14 @@ mod tests {
         let original_dir = std::env::current_dir().unwrap();
         std::env::set_current_dir(tmp.path()).unwrap();
 
-        let report = run_preflight(utf8_tmp(&tmp), &config);
+        let report = run_preflight(utf8_tmp(&tmp), &config, None);
 
         std::env::set_current_dir(original_dir).unwrap();
 
-        // Without detection: git repo, clean tree, release branch,
-        // remote sync, ecosystem = 5 checks (no required tools)
-        assert_eq!(report.checks.len(), 5);
+        // Without detection (standalone, None ship_options):
+        // git repo, clean tree, release branch, remote sync, ecosystem,
+        // gh auth = 6 checks (no required tools, no registry auth)
+        assert_eq!(report.checks.len(), 6);
     }
 
     // ---------------------------------------------------------------
@@ -1150,11 +1339,13 @@ mod tests {
                     name: "Git repository".into(),
                     passed: true,
                     message: "Inside a git repository".into(),
+                    skip_flag: None,
                 },
                 CheckResult {
                     name: "Working tree".into(),
                     passed: false,
                     message: "Uncommitted changes".into(),
+                    skip_flag: None,
                 },
             ],
             all_passed: false,
@@ -1182,6 +1373,221 @@ mod tests {
         let json = serde_json::to_string(&report).unwrap();
         let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
         assert!(parsed["detection"].is_null());
+    }
+
+    // ---------------------------------------------------------------
+    // Extended checks: gh auth, registry auth, tag availability
+    // ---------------------------------------------------------------
+
+    #[test]
+    fn check_gh_auth_runs_without_panic() {
+        // Result depends on whether `gh` is installed and authed,
+        // but the function should not panic.
+        let result = check_gh_auth();
+        assert_eq!(result.name, "GitHub CLI");
+        if !result.passed {
+            assert!(result.skip_flag.is_some());
+            assert_eq!(result.skip_flag.as_deref(), Some("--no-release"));
+        }
+    }
+
+    #[test]
+    fn check_registry_auth_rust() {
+        let result = check_registry_auth(Ecosystem::Rust);
+        assert_eq!(result.name, "Registry auth");
+        if !result.passed {
+            assert!(result.message.contains("CARGO_REGISTRY_TOKEN"));
+            assert_eq!(result.skip_flag.as_deref(), Some("--no-publish"));
+        }
+    }
+
+    #[test]
+    fn check_registry_auth_node() {
+        let result = check_registry_auth(Ecosystem::Node);
+        assert_eq!(result.name, "Registry auth");
+        if !result.passed {
+            assert!(result.message.contains("NPM_TOKEN"));
+            assert_eq!(result.skip_flag.as_deref(), Some("--no-publish"));
+        }
+    }
+
+    #[test]
+    fn check_registry_auth_python() {
+        let result = check_registry_auth(Ecosystem::Python);
+        assert_eq!(result.name, "Registry auth");
+        if !result.passed {
+            assert!(
+                result.message.contains("TWINE_PASSWORD") || result.message.contains("PYPI_TOKEN")
+            );
+        }
+    }
+
+    #[test]
+    fn check_registry_auth_go_skips() {
+        // Go doesn't publish via registry
+        let result = check_registry_auth(Ecosystem::Go);
+        assert!(result.passed);
+        assert!(result.message.contains("No registry publish"));
+    }
+
+    #[test]
+    fn check_registry_auth_generic_skips() {
+        let result = check_registry_auth(Ecosystem::Generic);
+        assert!(result.passed);
+    }
+
+    #[test]
+    fn check_tag_available_nonexistent_tag() {
+        // A tag that definitely doesn't exist
+        let result = check_tag_available("v99999.99999.99999-never-exists");
+        assert!(result.passed);
+        assert!(result.message.contains("does not exist"));
+        assert!(result.skip_flag.is_none());
+    }
+
+    #[test]
+    fn check_tag_available_reports_skip_flag() {
+        // If a tag exists, the result should include --no-tag as skip_flag
+        // We can't easily test the "exists" case without creating a tag,
+        // so verify the structure of a passing check instead.
+        let result = check_tag_available("v0.0.0-test-tag-xyz");
+        if !result.passed {
+            assert_eq!(result.skip_flag.as_deref(), Some("--no-tag"));
+        }
+    }
+
+    // ---------------------------------------------------------------
+    // ShipOptions gating: extended checks respect --no-* flags
+    // ---------------------------------------------------------------
+
+    #[test]
+    fn run_preflight_no_release_skips_gh_check() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        make_git_repo(&tmp);
+
+        let config = Config::default();
+        let opts = ShipOptions {
+            no_release: true,
+            ..Default::default()
+        };
+
+        let original_dir = std::env::current_dir().unwrap();
+        std::env::set_current_dir(tmp.path()).unwrap();
+
+        let report = run_preflight(utf8_tmp(&tmp), &config, Some(&opts));
+
+        std::env::set_current_dir(original_dir).unwrap();
+
+        // GitHub CLI check should NOT be present when --no-release
+        let gh_check = report.checks.iter().find(|c| c.name == "GitHub CLI");
+        assert!(
+            gh_check.is_none(),
+            "gh auth check should be skipped with --no-release"
+        );
+    }
+
+    #[test]
+    fn run_preflight_no_publish_skips_registry_check() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        make_git_repo(&tmp);
+        std::fs::write(tmp.path().join("Cargo.toml"), "[package]\nname = \"test\"").unwrap();
+
+        let config = Config::default();
+        let opts = ShipOptions {
+            no_publish: true,
+            ..Default::default()
+        };
+
+        let original_dir = std::env::current_dir().unwrap();
+        std::env::set_current_dir(tmp.path()).unwrap();
+
+        let report = run_preflight(utf8_tmp(&tmp), &config, Some(&opts));
+
+        std::env::set_current_dir(original_dir).unwrap();
+
+        // Registry auth check should NOT be present when --no-publish
+        let reg_check = report.checks.iter().find(|c| c.name == "Registry auth");
+        assert!(
+            reg_check.is_none(),
+            "registry check should be skipped with --no-publish"
+        );
+    }
+
+    #[test]
+    fn run_preflight_standalone_includes_gh_check() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        make_git_repo(&tmp);
+
+        let config = Config::default();
+
+        let original_dir = std::env::current_dir().unwrap();
+        std::env::set_current_dir(tmp.path()).unwrap();
+
+        // None = standalone preflight, check everything
+        let report = run_preflight(utf8_tmp(&tmp), &config, None);
+
+        std::env::set_current_dir(original_dir).unwrap();
+
+        // GitHub CLI check should be present
+        let gh_check = report.checks.iter().find(|c| c.name == "GitHub CLI");
+        assert!(
+            gh_check.is_some(),
+            "standalone preflight should include gh auth check"
+        );
+    }
+
+    #[test]
+    fn check_result_skip_flag_serializes_when_present() {
+        let result = CheckResult {
+            name: "test".into(),
+            passed: false,
+            message: "fail".into(),
+            skip_flag: Some("--no-publish".into()),
+        };
+        let json = serde_json::to_string(&result).unwrap();
+        assert!(json.contains("\"skip_flag\":\"--no-publish\""));
+    }
+
+    #[test]
+    fn check_result_skip_flag_omitted_when_none() {
+        let result = CheckResult {
+            name: "test".into(),
+            passed: true,
+            message: "ok".into(),
+            skip_flag: None,
+        };
+        let json = serde_json::to_string(&result).unwrap();
+        assert!(
+            !json.contains("skip_flag"),
+            "skip_flag should be omitted when None"
+        );
+    }
+
+    // ---------------------------------------------------------------
+    // Updated check counts with extended checks
+    // ---------------------------------------------------------------
+
+    #[test]
+    fn run_preflight_standalone_check_count() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        make_git_repo(&tmp);
+        // No marker files — no ecosystem, no registry check
+        let config = Config::default();
+
+        let original_dir = std::env::current_dir().unwrap();
+        std::env::set_current_dir(tmp.path()).unwrap();
+
+        let report = run_preflight(utf8_tmp(&tmp), &config, None);
+
+        std::env::set_current_dir(original_dir).unwrap();
+
+        // Without detection: git repo, clean tree, release branch,
+        // remote sync, ecosystem, gh auth = 6 checks
+        assert_eq!(
+            report.checks.len(),
+            6,
+            "standalone preflight without detection: 5 base + 1 gh auth"
+        );
     }
 
     #[test]

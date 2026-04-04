@@ -274,7 +274,7 @@ pub fn plan_ship(
     options: ShipOptions,
 ) -> ShipResult<ShipPlan> {
     // Phase 1: Preflight
-    let report = preflight::run_preflight(project_root, config);
+    let report = preflight::run_preflight(project_root, config, Some(&options));
 
     if !report.all_passed {
         let failures: Vec<&str> = report
@@ -358,6 +358,26 @@ pub fn resolve_ship_interaction(plan: InteractiveShip, chosen_version: Version) 
 // ──────────────────────────────────────────────
 
 impl ReadyShip {
+    /// Validate post-version-resolution preconditions.
+    ///
+    /// Called after the version is known but before the user confirms.
+    /// Returns failed checks as a `Vec` (empty = all good).
+    /// The CLI should display these and abort if any fail.
+    pub fn validate(&self) -> Vec<preflight::CheckResult> {
+        let mut failures = Vec::new();
+
+        // Tag existence check (unless skipped)
+        if !self.options.no_git && !self.options.no_tag {
+            let tag = format!("v{}", self.bump.next);
+            let check = preflight::check_tag_available(&tag);
+            if !check.passed {
+                failures.push(check);
+            }
+        }
+
+        failures
+    }
+
     /// Execute the full ship workflow.
     ///
     /// Calls `on_event` at phase boundaries so the CLI can update
@@ -2106,6 +2126,79 @@ mod tests {
         assert_eq!(ready.bump.next, Version::new(1, 1, 0));
         assert_eq!(ready.bump.previous, Version::new(1, 0, 0));
         assert_eq!(ready.detection.ecosystem, Ecosystem::Rust);
+    }
+
+    // ========================================================
+    // ReadyShip::validate
+    // ========================================================
+
+    #[test]
+    fn validate_passes_for_nonexistent_tag() {
+        let bump = ReadyBump {
+            previous: Version::new(0, 0, 0),
+            next: Version::parse("99999.99999.99999").unwrap(),
+            strategy: VersionStrategy::Explicit("99999.99999.99999".into()),
+            detection: test_detection_rust(),
+        };
+        let ready = ReadyShip {
+            bump,
+            options: ShipOptions::default(),
+            config: Config::default(),
+            detection: test_detection_rust(),
+        };
+        let failures = ready.validate();
+        assert!(
+            failures.is_empty(),
+            "validate should pass for a tag that doesn't exist"
+        );
+    }
+
+    #[test]
+    fn validate_skipped_when_no_tag() {
+        let bump = ReadyBump {
+            previous: Version::new(0, 0, 0),
+            next: Version::new(0, 1, 0),
+            strategy: VersionStrategy::Explicit("0.1.0".into()),
+            detection: test_detection_rust(),
+        };
+        let ready = ReadyShip {
+            bump,
+            options: ShipOptions {
+                no_tag: true,
+                ..Default::default()
+            },
+            config: Config::default(),
+            detection: test_detection_rust(),
+        };
+        let failures = ready.validate();
+        assert!(
+            failures.is_empty(),
+            "validate should skip tag check when --no-tag"
+        );
+    }
+
+    #[test]
+    fn validate_skipped_when_no_git() {
+        let bump = ReadyBump {
+            previous: Version::new(0, 0, 0),
+            next: Version::new(0, 1, 0),
+            strategy: VersionStrategy::Explicit("0.1.0".into()),
+            detection: test_detection_rust(),
+        };
+        let ready = ReadyShip {
+            bump,
+            options: ShipOptions {
+                no_git: true,
+                ..Default::default()
+            },
+            config: Config::default(),
+            detection: test_detection_rust(),
+        };
+        let failures = ready.validate();
+        assert!(
+            failures.is_empty(),
+            "validate should skip tag check when --no-git"
+        );
     }
 
     #[test]
