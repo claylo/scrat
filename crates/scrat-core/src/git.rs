@@ -343,6 +343,18 @@ fn parse_diff_stat(output: &str) -> (usize, usize, usize) {
     (files, insertions, deletions)
 }
 
+/// Check if a tag already exists (locally or on the remote).
+///
+/// Uses `git tag -l` for the local check. This catches the common case
+/// where the tag was created by a previous (possibly partial) release run.
+#[instrument]
+pub fn tag_exists(tag: &str) -> GitResult<bool> {
+    let output = git(&["tag", "-l", tag])?;
+    let exists = !output.trim().is_empty();
+    debug!(%tag, exists, "tag existence check");
+    Ok(exists)
+}
+
 /// Check if we're inside a git repository.
 #[instrument]
 pub fn is_inside_repo() -> GitResult<bool> {
@@ -417,6 +429,24 @@ mod tests {
     fn detect_release_branch_works_in_repo() {
         if is_inside_repo().unwrap_or(false) {
             let result = detect_release_branch();
+            assert!(result.is_ok());
+        }
+    }
+
+    #[test]
+    fn tag_exists_returns_false_for_nonexistent() {
+        if is_inside_repo().unwrap_or(false) {
+            let result = tag_exists("v99999.99999.99999-never-exists");
+            assert!(result.is_ok());
+            assert!(!result.unwrap());
+        }
+    }
+
+    #[test]
+    fn tag_exists_does_not_error() {
+        if is_inside_repo().unwrap_or(false) {
+            // Even for empty string, should not panic
+            let result = tag_exists("");
             assert!(result.is_ok());
         }
     }

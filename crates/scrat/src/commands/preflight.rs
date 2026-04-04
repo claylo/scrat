@@ -24,7 +24,8 @@ pub fn cmd_preflight(
     debug!(json_output = global_json, "executing preflight command");
 
     let mut config = config.clone();
-    let mut report = preflight::run_preflight(cwd, &config);
+    // Standalone preflight: None means check everything (no phases skipped)
+    let mut report = preflight::run_preflight(cwd, &config, None);
 
     // If no ecosystem detected and not in JSON mode, prompt the user
     if report.detection.is_none() && !global_json {
@@ -33,7 +34,7 @@ pub fn cmd_preflight(
                 // Re-run preflight with the user's ecosystem choice
                 let project = config.project.get_or_insert_with(ProjectConfig::default);
                 project.project_type = Some(ecosystem);
-                report = preflight::run_preflight(cwd, &config);
+                report = preflight::run_preflight(cwd, &config, None);
             }
             Err(_) => {
                 // User cancelled — show the original report
@@ -53,6 +54,17 @@ pub fn cmd_preflight(
             } else {
                 "✗".red().to_string()
             };
+            if let Some(ref flag) = check.skip_flag
+                && !check.passed
+            {
+                println!(
+                    "  {icon} {}: {} {}",
+                    check.name.bold(),
+                    check.message,
+                    format!("(skip with {flag})").dimmed(),
+                );
+                continue;
+            }
             println!("  {icon} {}: {}", check.name.bold(), check.message);
         }
 
