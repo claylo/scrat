@@ -1,3 +1,8 @@
+## [0.1.1] - 2026-04-05
+
+### 🐛 Bug Fixes
+
+- *(ship)* Render release notes before git phase creates tag (#31)
 ## [0.1.0] - 2026-04-05
 
 ### 🚀 Features
@@ -45,3 +50,4 @@
 - Update to claylo-rs 1.3.0 (#24)
 - Coda config
 - Update workflows based on what scrat will do (#29)
+- Release 0.1.0

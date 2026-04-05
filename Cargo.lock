@@ -1287,7 +1287,7 @@ checksum = "94143f37725109f92c262ed2cf5e59bce7498c01bcc1502d7b9afe439a4e9f49"
 
 [[package]]
 name = "scrat"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "anyhow",
  "assert_cmd",
@@ -1309,7 +1309,7 @@ dependencies = [
 
 [[package]]
 name = "scrat-core"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "anyhow",
  "camino",
@@ -2116,7 +2116,7 @@ checksum = "9edde0db4769d2dc68579893f2306b26c6ecfbe0ef499b013d731b7b9247e0b9"
 
 [[package]]
 name = "xtask"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "clap",
  "clap_complete",
