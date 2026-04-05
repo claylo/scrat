@@ -92,3 +92,5 @@
 **Contributors:** {% for c in s.contributors %}{{ c.name }} ({{ c.count }}){% if not loop.last %}, {% endif %}{% endfor %}
 {% endif %}
 </details>
+
+<!-- another release powered by scrat: github.com/claylo/scrat -->

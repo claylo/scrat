@@ -573,6 +573,51 @@ impl ReadyShip {
             &mut ctx,
         )?;
 
+        // ── Release Notes (must run BEFORE git phase creates the tag) ──
+        // git-cliff --unreleased --context finds commits since the latest tag.
+        // Once the git phase tags, --unreleased returns nothing.
+        let notes_file = if !self.options.no_release && !self.options.no_notes && !is_dry {
+            let github_release = self
+                .config
+                .release
+                .as_ref()
+                .and_then(|r| r.github_release)
+                .unwrap_or(true);
+            if github_release {
+                let custom_template = self
+                    .config
+                    .release
+                    .as_ref()
+                    .and_then(|r| r.notes_template.as_deref());
+                match notes::render_notes(project_root, &ctx, custom_template) {
+                    Ok(rendered) => {
+                        debug!(len = rendered.len(), "release notes rendered");
+                        ctx.release_notes = Some(rendered.clone());
+                        // Write to temp file for --notes-file
+                        match write_notes_tempfile(&rendered) {
+                            Ok(f) => Some(f),
+                            Err(e) => {
+                                warn!(
+                                    "failed to write notes temp file: {e}, falling back to --generate-notes"
+                                );
+                                None
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        warn!(
+                            "release notes rendering failed: {e}, falling back to --generate-notes"
+                        );
+                        None
+                    }
+                }
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+
         // ── Git Phase (commit + tag + push) ──
         if !self.options.no_git {
             hooks_run += run_phase_hooks(
@@ -656,49 +701,6 @@ impl ReadyShip {
             &mut on_event,
             &mut ctx,
         )?;
-
-        // Render release notes (before creating the release)
-        let notes_file = if !self.options.no_release && !self.options.no_notes && !is_dry {
-            let github_release = self
-                .config
-                .release
-                .as_ref()
-                .and_then(|r| r.github_release)
-                .unwrap_or(true);
-            if github_release {
-                let custom_template = self
-                    .config
-                    .release
-                    .as_ref()
-                    .and_then(|r| r.notes_template.as_deref());
-                match notes::render_notes(project_root, &ctx, custom_template) {
-                    Ok(rendered) => {
-                        debug!(len = rendered.len(), "release notes rendered");
-                        ctx.release_notes = Some(rendered.clone());
-                        // Write to temp file for --notes-file
-                        match write_notes_tempfile(&rendered) {
-                            Ok(f) => Some(f),
-                            Err(e) => {
-                                warn!(
-                                    "failed to write notes temp file: {e}, falling back to --generate-notes"
-                                );
-                                None
-                            }
-                        }
-                    }
-                    Err(e) => {
-                        warn!(
-                            "release notes rendering failed: {e}, falling back to --generate-notes"
-                        );
-                        None
-                    }
-                }
-            } else {
-                None
-            }
-        } else {
-            None
-        };
 
         // Resolve release config for both dry-run and real execution
         let release_cfg = self.config.release.as_ref();
