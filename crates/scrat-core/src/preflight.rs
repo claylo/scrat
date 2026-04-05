@@ -91,11 +91,14 @@ pub fn run_preflight(
 
     // ── Extended checks: credentials & auth ──
     // These validate that later pipeline phases can succeed.
-    // When ship_options is None (standalone `scrat preflight`), assume
-    // all phases will run and check everything.
+    // When ship_options is provided (via `scrat ship`), use those flags.
+    // Otherwise fall back to config [ship] section for phase-skip settings.
 
-    let skip_release = ship_options.is_some_and(|o| o.no_release);
-    let skip_publish = ship_options.is_some_and(|o| o.no_publish);
+    let ship_cfg = config.ship.as_ref();
+    let skip_release = ship_options.is_some_and(|o| o.no_release)
+        || ship_cfg.and_then(|s| s.no_release).unwrap_or(false);
+    let skip_publish = ship_options.is_some_and(|o| o.no_publish)
+        || ship_cfg.and_then(|s| s.no_publish).unwrap_or(false);
 
     // Check 7: GitHub CLI auth (needed for release phase)
     if !skip_release {
