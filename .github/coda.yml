@@ -30,3 +30,4 @@ variables:
   GPG_SIGNING_ENABLED: true
   NPM_ENABLED: true
   SBOM_ENABLED: true
+  AUTO_RELEASE_ENABLED: false
