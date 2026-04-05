@@ -392,6 +392,12 @@ fn inject_extra(context_json: &str, ctx: &PipelineContext) -> Result<String, Not
     let extra = build_extra(ctx);
     release["extra"] = extra;
 
+    // Inject the version — git-cliff's --unreleased context leaves this empty
+    // because the tag doesn't exist yet (notes render before the git phase)
+    if !ctx.tag.is_empty() {
+        release["version"] = serde_json::Value::String(ctx.tag.clone());
+    }
+
     serde_json::to_string(&releases)
         .map_err(|e| NotesError::CliffContext(format!("failed to re-serialize context: {e}")))
 }
