@@ -393,9 +393,13 @@ fn inject_extra(context_json: &str, ctx: &PipelineContext) -> Result<String, Not
     release["extra"] = extra;
 
     // Inject the version — git-cliff's --unreleased context leaves this empty
-    // because the tag doesn't exist yet (notes render before the git phase)
-    if !ctx.tag.is_empty() {
-        release["version"] = serde_json::Value::String(ctx.tag.clone());
+    // because the tag doesn't exist yet (notes render before the git phase).
+    // Only fill it in when missing; use bare version, not the tag prefix.
+    let version_missing = release
+        .get("version")
+        .is_none_or(|v| v.is_null() || v.as_str().is_some_and(str::is_empty));
+    if version_missing && !ctx.version.is_empty() {
+        release["version"] = serde_json::Value::String(ctx.version.clone());
     }
 
     serde_json::to_string(&releases)
