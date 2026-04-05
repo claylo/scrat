@@ -2,5 +2,5 @@
 
 ## Guides
 
-- [Releasing](releasing.md) - Version bumping, changelog generation, and distribution
-- [Template Updates](template-updates.md) - Pulling in template improvements, managing copyright years
+- [Getting Started](getting-started.md) - Install, first release, configuration basics
+- [Agent Guide](agent-guide.md) - Comprehensive reference for AI agents assisting with scrat workflows
