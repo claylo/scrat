@@ -206,6 +206,26 @@ pub struct ShipConfig {
     /// for confirmation before executing. Set to `false` for CI/scripted use.
     /// The `--yes`/`-y` CLI flag overrides this at runtime.
     pub confirm: Option<bool>,
+    /// Skip changelog generation during bump (equivalent to `--no-changelog`).
+    pub no_changelog: Option<bool>,
+    /// Skip publishing to registry (equivalent to `--no-publish`).
+    pub no_publish: Option<bool>,
+    /// Skip git push (equivalent to `--no-push`).
+    pub no_push: Option<bool>,
+    /// Skip GitHub release creation (equivalent to `--no-release`).
+    pub no_release: Option<bool>,
+    /// Skip dependency diff (equivalent to `--no-deps`).
+    pub no_deps: Option<bool>,
+    /// Skip release statistics collection (equivalent to `--no-stats`).
+    pub no_stats: Option<bool>,
+    /// Skip release notes rendering (equivalent to `--no-notes`).
+    pub no_notes: Option<bool>,
+    /// Skip running tests (equivalent to `--no-test`).
+    pub no_test: Option<bool>,
+    /// Skip git tag creation (equivalent to `--no-tag`).
+    pub no_tag: Option<bool>,
+    /// Skip entire git phase — commit, tag, push (equivalent to `--no-git`).
+    pub no_git: Option<bool>,
 }
 
 /// Log level configuration.
@@ -1011,6 +1031,86 @@ confirm = false
     fn test_config_ship_defaults_to_none() {
         let config = Config::default();
         assert!(config.ship.is_none());
+    }
+
+    #[test]
+    fn test_config_ship_no_flags() {
+        let tmp = TempDir::new().unwrap();
+        let config_path = tmp.path().join("config.toml");
+        fs::write(
+            &config_path,
+            r#"
+[ship]
+confirm = false
+no_publish = true
+no_release = true
+no_test = true
+"#,
+        )
+        .unwrap();
+
+        let config_path = Utf8PathBuf::try_from(config_path).unwrap();
+        let (config, _sources) = ConfigLoader::new()
+            .with_user_config(false)
+            .with_file(&config_path)
+            .load()
+            .unwrap();
+
+        let ship = config.ship.unwrap();
+        assert_eq!(ship.confirm, Some(false));
+        assert_eq!(ship.no_publish, Some(true));
+        assert_eq!(ship.no_release, Some(true));
+        assert_eq!(ship.no_test, Some(true));
+        // Unset fields remain None
+        assert!(ship.no_changelog.is_none());
+        assert!(ship.no_push.is_none());
+        assert!(ship.no_deps.is_none());
+        assert!(ship.no_stats.is_none());
+        assert!(ship.no_notes.is_none());
+        assert!(ship.no_tag.is_none());
+        assert!(ship.no_git.is_none());
+    }
+
+    #[test]
+    fn test_config_ship_all_no_flags() {
+        let tmp = TempDir::new().unwrap();
+        let config_path = tmp.path().join("config.toml");
+        fs::write(
+            &config_path,
+            r#"
+[ship]
+no_changelog = true
+no_publish = true
+no_push = true
+no_release = true
+no_deps = true
+no_stats = true
+no_notes = true
+no_test = true
+no_tag = true
+no_git = true
+"#,
+        )
+        .unwrap();
+
+        let config_path = Utf8PathBuf::try_from(config_path).unwrap();
+        let (config, _sources) = ConfigLoader::new()
+            .with_user_config(false)
+            .with_file(&config_path)
+            .load()
+            .unwrap();
+
+        let ship = config.ship.unwrap();
+        assert_eq!(ship.no_changelog, Some(true));
+        assert_eq!(ship.no_publish, Some(true));
+        assert_eq!(ship.no_push, Some(true));
+        assert_eq!(ship.no_release, Some(true));
+        assert_eq!(ship.no_deps, Some(true));
+        assert_eq!(ship.no_stats, Some(true));
+        assert_eq!(ship.no_notes, Some(true));
+        assert_eq!(ship.no_test, Some(true));
+        assert_eq!(ship.no_tag, Some(true));
+        assert_eq!(ship.no_git, Some(true));
     }
 
     #[test]

@@ -253,6 +253,8 @@ assets = ["release-card.png", "checksums.txt"]
 # Ship command behavior
 [ship]
 confirm = true  # default — set to false for CI/scripted use
+# no_publish = true   # skip registry publish (e.g., private tools)
+# no_release = true   # skip GitHub release creation
 ```
 
 Config files are discovered automatically:

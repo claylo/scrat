@@ -3132,6 +3132,7 @@ mod tests {
         let config = Config {
             ship: Some(ShipConfig {
                 confirm: Some(false),
+                ..Default::default()
             }),
             ..Default::default()
         };

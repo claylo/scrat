@@ -98,19 +98,21 @@ pub fn cmd_ship(
         None
     };
 
+    let ship_cfg = config.ship.as_ref();
+
     let options = ShipOptions {
         explicit_version: args.version,
-        no_changelog: args.no_changelog,
-        no_publish: args.no_publish,
-        no_push: args.no_push,
-        no_release: args.no_release,
-        no_deps: args.no_deps,
-        no_stats: args.no_stats,
-        no_notes: args.no_notes,
+        no_changelog: args.no_changelog || ship_cfg.and_then(|s| s.no_changelog).unwrap_or(false),
+        no_publish: args.no_publish || ship_cfg.and_then(|s| s.no_publish).unwrap_or(false),
+        no_push: args.no_push || ship_cfg.and_then(|s| s.no_push).unwrap_or(false),
+        no_release: args.no_release || ship_cfg.and_then(|s| s.no_release).unwrap_or(false),
+        no_deps: args.no_deps || ship_cfg.and_then(|s| s.no_deps).unwrap_or(false),
+        no_stats: args.no_stats || ship_cfg.and_then(|s| s.no_stats).unwrap_or(false),
+        no_notes: args.no_notes || ship_cfg.and_then(|s| s.no_notes).unwrap_or(false),
         dry_run: args.dry_run,
-        no_test: args.no_test,
-        no_tag: args.no_tag,
-        no_git: args.no_git,
+        no_test: args.no_test || ship_cfg.and_then(|s| s.no_test).unwrap_or(false),
+        no_tag: args.no_tag || ship_cfg.and_then(|s| s.no_tag).unwrap_or(false),
+        no_git: args.no_git || ship_cfg.and_then(|s| s.no_git).unwrap_or(false),
         draft_override,
     };
 
