@@ -19,30 +19,12 @@ env:
   PROJECT_NAME: scrat
 
 jobs:
-  generate-changelog:
-    name: Generate changelog
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    permissions:
-      contents: read
-    outputs:
-      release_body: ${{ steps.changelog.outputs.release_body }}
-      version: ${{ steps.changelog.outputs.version }}
-    steps:
-      - name: Checkout
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-        with:
-          fetch-depth: 0
-
-      - name: Generate release changelog
-        id: changelog
-        uses: ./.github/actions/generate-release-changelog
-
   publish-binaries:
     name: Build ${{ matrix.build.NAME }}
-    needs: generate-changelog
     runs-on: ${{ matrix.build.os }}
     timeout-minutes: 60
+    outputs:
+      version: ${{ steps.version.outputs.version }}
     strategy:
       fail-fast: false
       matrix:
@@ -56,6 +38,11 @@ jobs:
           - { NAME: windows-x64-msvc, os: windows-2025, target: x86_64-pc-windows-msvc }
           - { NAME: windows-arm64-msvc, os: windows-2025, target: aarch64-pc-windows-msvc }
     steps:
+      - name: Extract version from tag
+        id: version
+        shell: bash
+        run: echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+
       - name: Checkout
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
 
@@ -130,7 +117,7 @@ jobs:
       - name: Prepare release assets
         shell: bash
         env:
-          VERSION: ${{ needs.generate-changelog.outputs.version }}
+          VERSION: ${{ steps.version.outputs.version }}
           TARGET: ${{ matrix.build.target }}
         run: |
           mkdir -p release/bin release/share
@@ -163,7 +150,7 @@ jobs:
       - name: Sign release (GPG)
         if: (matrix.build.os == 'ubuntu-22.04' || matrix.build.os == 'macos-15') && vars.GPG_SIGNING_ENABLED == 'true'
         env:
-          VERSION: ${{ needs.generate-changelog.outputs.version }}
+          VERSION: ${{ steps.version.outputs.version }}
           TARGET: ${{ matrix.build.target }}
         run: |
           echo "${{ secrets.GPG_RELEASE_KEY }}" | base64 --decode > private.key
@@ -176,36 +163,32 @@ jobs:
         uses: svenstaro/upload-release-action@29e53e917877a24fad85510ded594ab3c9ca12de # 2.11.5
         with:
           repo_token: ${{ secrets.GITHUB_TOKEN }}
-          file: ${{ env.PROJECT_NAME }}-${{ needs.generate-changelog.outputs.version }}-${{ matrix.build.target }}*
+          file: ${{ env.PROJECT_NAME }}-${{ steps.version.outputs.version }}-${{ matrix.build.target }}*
           file_glob: true
           overwrite: true
           tag: ${{ github.ref }}
-          release_name: "Release v${{ needs.generate-changelog.outputs.version }}"
-          body: "${{ needs.generate-changelog.outputs.release_body }}"
 
       - name: Upload pre-release
         if: ${{ contains(github.ref, '-') }}
         uses: svenstaro/upload-release-action@29e53e917877a24fad85510ded594ab3c9ca12de # 2.11.5
         with:
           repo_token: ${{ secrets.GITHUB_TOKEN }}
-          file: ${{ env.PROJECT_NAME }}-${{ needs.generate-changelog.outputs.version }}-${{ matrix.build.target }}*
+          file: ${{ env.PROJECT_NAME }}-${{ steps.version.outputs.version }}-${{ matrix.build.target }}*
           file_glob: true
           overwrite: true
           tag: ${{ github.ref }}
-          release_name: "Pre-release v${{ needs.generate-changelog.outputs.version }}"
           prerelease: true
-
 
       - name: Generate artifact attestation
         uses: actions/attest-build-provenance@a2bbfa25375fe432b6a289bc6b6cd05ecd0c4c32 # v4.1.0
         with:
-          subject-path: ${{ env.PROJECT_NAME }}-${{ needs.generate-changelog.outputs.version }}-${{ matrix.build.target }}*
+          subject-path: ${{ env.PROJECT_NAME }}-${{ steps.version.outputs.version }}-${{ matrix.build.target }}*
 
 
   publish-crates-io:
     name: Publish to crates.io
     if: ${{ !contains(github.ref, '-') && vars.CRATES_IO_ENABLED == 'true' }}
-    needs: [generate-changelog, publish-binaries]
+    needs: publish-binaries
     runs-on: ubuntu-latest
     timeout-minutes: 15
     permissions:
@@ -225,13 +208,13 @@ jobs:
   publish-homebrew:
     name: Publish Homebrew formula
     if: ${{ !contains(github.ref, '-') && vars.HOMEBREW_ENABLED == 'true' }}
-    needs: [generate-changelog, publish-binaries]
+    needs: publish-binaries
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
       contents: read
     env:
-      VERSION: ${{ needs.generate-changelog.outputs.version }}
+      VERSION: ${{ needs.publish-binaries.outputs.version }}
     steps:
       - name: Download SHA256 checksums
         env:
@@ -297,7 +280,7 @@ jobs:
   publish-deb:
     name: Publish Debian package
     if: vars.DEB_ENABLED == 'true'
-    needs: [generate-changelog, publish-binaries]
+    needs: publish-binaries
     runs-on: ubuntu-22.04
     timeout-minutes: 30
     permissions:
@@ -319,7 +302,7 @@ jobs:
 
       - name: Build Debian package
         env:
-          VERSION: ${{ needs.generate-changelog.outputs.version }}
+          VERSION: ${{ needs.publish-binaries.outputs.version }}
         run: |
           cargo build --release --locked
           cargo deb --no-build -o "${PROJECT_NAME}-${VERSION}.deb"
@@ -327,7 +310,7 @@ jobs:
       - name: Sign package
         if: vars.GPG_SIGNING_ENABLED == 'true'
         env:
-          VERSION: ${{ needs.generate-changelog.outputs.version }}
+          VERSION: ${{ needs.publish-binaries.outputs.version }}
         run: |
           echo "${{ secrets.GPG_RELEASE_KEY }}" | base64 --decode > private.key
           echo "${{ secrets.GPG_PASSPHRASE }}" | gpg --pinentry-mode=loopback --passphrase-fd 0 --import private.key
@@ -339,29 +322,26 @@ jobs:
         uses: svenstaro/upload-release-action@29e53e917877a24fad85510ded594ab3c9ca12de # 2.11.5
         with:
           repo_token: ${{ secrets.GITHUB_TOKEN }}
-          file: ${{ env.PROJECT_NAME }}-${{ needs.generate-changelog.outputs.version }}.deb*
+          file: ${{ env.PROJECT_NAME }}-${{ needs.publish-binaries.outputs.version }}.deb*
           file_glob: true
           overwrite: true
           tag: ${{ github.ref }}
-          release_name: "Release v${{ needs.generate-changelog.outputs.version }}"
-          body: "${{ needs.generate-changelog.outputs.release_body }}"
 
       - name: Upload pre-release
         if: ${{ contains(github.ref, '-') }}
         uses: svenstaro/upload-release-action@29e53e917877a24fad85510ded594ab3c9ca12de # 2.11.5
         with:
           repo_token: ${{ secrets.GITHUB_TOKEN }}
-          file: ${{ env.PROJECT_NAME }}-${{ needs.generate-changelog.outputs.version }}.deb*
+          file: ${{ env.PROJECT_NAME }}-${{ needs.publish-binaries.outputs.version }}.deb*
           file_glob: true
           overwrite: true
           tag: ${{ github.ref }}
-          release_name: "Pre-release v${{ needs.generate-changelog.outputs.version }}"
           prerelease: true
 
   publish-rpm:
     name: Publish RPM package
     if: vars.RPM_ENABLED == 'true'
-    needs: [generate-changelog, publish-binaries]
+    needs: publish-binaries
     runs-on: ubuntu-22.04
     timeout-minutes: 30
     permissions:
@@ -383,7 +363,7 @@ jobs:
 
       - name: Build RPM package
         env:
-          VERSION: ${{ needs.generate-changelog.outputs.version }}
+          VERSION: ${{ needs.publish-binaries.outputs.version }}
         run: |
           cargo build --release --locked
           cargo generate-rpm -o "${PROJECT_NAME}-${VERSION}.x86_64.rpm"
@@ -391,7 +371,7 @@ jobs:
       - name: Sign package
         if: vars.GPG_SIGNING_ENABLED == 'true'
         env:
-          VERSION: ${{ needs.generate-changelog.outputs.version }}
+          VERSION: ${{ needs.publish-binaries.outputs.version }}
         run: |
           echo "${{ secrets.GPG_RELEASE_KEY }}" | base64 --decode > private.key
           echo "${{ secrets.GPG_PASSPHRASE }}" | gpg --pinentry-mode=loopback --passphrase-fd 0 --import private.key
@@ -403,36 +383,33 @@ jobs:
         uses: svenstaro/upload-release-action@29e53e917877a24fad85510ded594ab3c9ca12de # 2.11.5
         with:
           repo_token: ${{ secrets.GITHUB_TOKEN }}
-          file: ${{ env.PROJECT_NAME }}-${{ needs.generate-changelog.outputs.version }}.x86_64.rpm*
+          file: ${{ env.PROJECT_NAME }}-${{ needs.publish-binaries.outputs.version }}.x86_64.rpm*
           file_glob: true
           overwrite: true
           tag: ${{ github.ref }}
-          release_name: "Release v${{ needs.generate-changelog.outputs.version }}"
-          body: "${{ needs.generate-changelog.outputs.release_body }}"
 
       - name: Upload pre-release
         if: ${{ contains(github.ref, '-') }}
         uses: svenstaro/upload-release-action@29e53e917877a24fad85510ded594ab3c9ca12de # 2.11.5
         with:
           repo_token: ${{ secrets.GITHUB_TOKEN }}
-          file: ${{ env.PROJECT_NAME }}-${{ needs.generate-changelog.outputs.version }}.x86_64.rpm*
+          file: ${{ env.PROJECT_NAME }}-${{ needs.publish-binaries.outputs.version }}.x86_64.rpm*
           file_glob: true
           overwrite: true
           tag: ${{ github.ref }}
-          release_name: "Pre-release v${{ needs.generate-changelog.outputs.version }}"
           prerelease: true
 
   publish-npm:
     name: Publish to npm
     if: ${{ !contains(github.ref, '-') && vars.NPM_ENABLED == 'true' }}
-    needs: [generate-changelog, publish-binaries]
+    needs: publish-binaries
     runs-on: ubuntu-latest
     timeout-minutes: 15
     permissions:
       contents: read
       id-token: write # OIDC for npm provenance (after initial publish)
     env:
-      VERSION: ${{ needs.generate-changelog.outputs.version }}
+      VERSION: ${{ needs.publish-binaries.outputs.version }}
       NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
     steps:
       - name: Checkout
