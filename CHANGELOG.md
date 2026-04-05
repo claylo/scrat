@@ -1,8 +1,18 @@
+## [0.1.2] - 2026-04-05
+
+### 🐛 Bug Fixes
+
+- *(notes)* Inject version into cliff context so notes render under the release tag (#32)
+- *(notes)* Only inject version when cliff context has none (#33)
 ## [0.1.1] - 2026-04-05
 
 ### 🐛 Bug Fixes
 
 - *(ship)* Render release notes before git phase creates tag (#31)
+
+### ⚙️ Miscellaneous Tasks
+
+- Release 0.1.1
 ## [0.1.0] - 2026-04-05
 
 ### 🚀 Features
