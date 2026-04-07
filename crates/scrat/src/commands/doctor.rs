@@ -133,7 +133,7 @@ pub fn cmd_doctor(
             );
         } else {
             println!("  {} No config file found", "○".yellow());
-            offer_config_creation()?;
+            offer_config_creation(config::user_config_dir().as_deref())?;
         }
         println!();
 
@@ -181,8 +181,8 @@ fn print_dir(label: &str, path: &Option<String>) {
 }
 
 /// Offer to create a default config file when none exists.
-fn offer_config_creation() -> anyhow::Result<()> {
-    let Some(config_dir) = config::user_config_dir() else {
+fn offer_config_creation(config_dir: Option<&camino::Utf8Path>) -> anyhow::Result<()> {
+    let Some(config_dir) = config_dir else {
         return Ok(());
     };
 
@@ -231,23 +231,37 @@ mod tests {
         camino::Utf8PathBuf::from("/tmp")
     }
 
-    fn test_sources() -> ConfigSources {
+    /// Sources with no config found — used for JSON mode where the offer
+    /// path is never reached.
+    fn empty_sources() -> ConfigSources {
         ConfigSources::default()
+    }
+
+    /// Sources that report a config as found — prevents `offer_config_creation`
+    /// from running, which would attempt to write to the real user config dir.
+    fn found_sources() -> ConfigSources {
+        ConfigSources {
+            project_file: Some(camino::Utf8PathBuf::from("/tmp/scrat.toml")),
+            ..Default::default()
+        }
     }
 
     #[test]
     fn test_cmd_doctor_text_succeeds() {
-        assert!(cmd_doctor(DoctorArgs::default(), false, &test_sources(), &test_cwd()).is_ok());
+        // Use found_sources so the text path doesn't trigger offer_config_creation,
+        // which writes to the real user config dir.
+        assert!(cmd_doctor(DoctorArgs::default(), false, &found_sources(), &test_cwd()).is_ok());
     }
 
     #[test]
     fn test_cmd_doctor_json_succeeds() {
-        assert!(cmd_doctor(DoctorArgs::default(), true, &test_sources(), &test_cwd()).is_ok());
+        // JSON mode never hits offer_config_creation, so empty sources are fine.
+        assert!(cmd_doctor(DoctorArgs::default(), true, &empty_sources(), &test_cwd()).is_ok());
     }
 
     #[test]
     fn test_doctor_report_gathers() {
-        let report = DoctorReport::gather(&test_sources(), &test_cwd());
+        let report = DoctorReport::gather(&empty_sources(), &test_cwd());
         // On most systems, at least config dir should resolve
         assert!(report.directories.config.is_some() || report.directories.cache.is_some());
     }
