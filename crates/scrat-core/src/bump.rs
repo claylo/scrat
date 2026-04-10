@@ -971,7 +971,7 @@ mod tests {
             next: Version::new(2, 0, 0),
             strategy: VersionStrategy::Interactive,
             detection: generic_detection(),
-            version_files: vf.clone(),
+            version_files: vf,
         };
 
         assert_eq!(bump.version_files.len(), 1);
