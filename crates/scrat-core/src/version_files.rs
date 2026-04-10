@@ -332,6 +332,142 @@ fn apply_dot_path_toml<'a>(
     Some(current)
 }
 
+// ──────────────────────────────────────────────
+// Text (plain version file)
+// ──────────────────────────────────────────────
+
+fn update_text(path: &Utf8Path, version: &str) -> BumpResult<bool> {
+    std::fs::write(path, format!("{version}\n")).map_err(|e| BumpError::ToolFailed {
+        tool: path.to_string(),
+        message: format!("failed to write: {e}"),
+    })?;
+    debug!(%version, %path, "updated text version file");
+    Ok(true)
+}
+
+// ──────────────────────────────────────────────
+// Config validation
+// ──────────────────────────────────────────────
+
+fn validate_config(config: &VersionFileConfig) -> BumpResult<()> {
+    if config.field.is_some() && config.fields.is_some() {
+        return Err(BumpError::ToolFailed {
+            tool: config.path.clone(),
+            message: "`field` and `fields` are mutually exclusive".into(),
+        });
+    }
+    if config.format == VersionFileFormat::Text {
+        if config.field.is_some() || config.fields.is_some() {
+            return Err(BumpError::ToolFailed {
+                tool: config.path.clone(),
+                message: "`text` format does not use `field` or `fields`".into(),
+            });
+        }
+    } else if config.field.is_none() && config.fields.is_none() {
+        return Err(BumpError::ToolFailed {
+            tool: config.path.clone(),
+            message: "non-text formats require `field` or `fields`".into(),
+        });
+    }
+    Ok(())
+}
+
+// ──────────────────────────────────────────────
+// Orchestrator
+// ──────────────────────────────────────────────
+
+fn is_glob(path: &str) -> bool {
+    path.contains('*') || path.contains('?') || path.contains('[')
+}
+
+fn resolve_paths(root: &Utf8Path, path_pattern: &str) -> BumpResult<(Vec<Utf8PathBuf>, bool)> {
+    let is_glob_pattern = is_glob(path_pattern);
+    if is_glob_pattern {
+        let full_pattern = root.join(path_pattern).to_string();
+        let matches: Vec<Utf8PathBuf> = glob::glob(&full_pattern)
+            .map_err(|e| BumpError::ToolFailed {
+                tool: path_pattern.to_string(),
+                message: format!("invalid glob pattern: {e}"),
+            })?
+            .filter_map(|entry| entry.ok())
+            .filter_map(|p| Utf8PathBuf::try_from(p).ok())
+            .collect();
+        Ok((matches, true))
+    } else {
+        let full_path = root.join(path_pattern);
+        if !full_path.exists() {
+            return Err(BumpError::ToolFailed {
+                tool: path_pattern.to_string(),
+                message: format!("file not found: {full_path}"),
+            });
+        }
+        Ok((vec![full_path], false))
+    }
+}
+
+fn collect_dot_paths(config: &VersionFileConfig) -> Vec<&str> {
+    if let Some(ref f) = config.field {
+        vec![f.as_str()]
+    } else if let Some(ref fs) = config.fields {
+        fs.iter().map(|s| s.as_str()).collect()
+    } else {
+        vec![]
+    }
+}
+
+/// Update version in all configured version files.
+/// Returns list of modified file paths (relative to root).
+pub fn bump_version_files(
+    root: &Utf8Path,
+    configs: &[VersionFileConfig],
+    version: &str,
+) -> BumpResult<Vec<String>> {
+    let mut modified_files = Vec::new();
+
+    for config in configs {
+        validate_config(config)?;
+        let (paths, from_glob) = resolve_paths(root, &config.path)?;
+
+        if from_glob && paths.is_empty() {
+            warn!(pattern = %config.path, "glob matched no files");
+            continue;
+        }
+
+        let dot_paths = collect_dot_paths(config);
+
+        for path in &paths {
+            let updated = match config.format {
+                VersionFileFormat::Json => update_json(path, &dot_paths, version)?,
+                VersionFileFormat::Toml => update_toml(path, &dot_paths, version)?,
+                VersionFileFormat::Yaml => update_yaml(path, &dot_paths, version)?,
+                VersionFileFormat::Frontmatter => update_frontmatter(path, &dot_paths, version)?,
+                VersionFileFormat::Text => update_text(path, version)?,
+            };
+
+            if updated {
+                let relative = path.strip_prefix(root).unwrap_or(path).to_string();
+                modified_files.push(relative);
+            } else if !from_glob {
+                return Err(BumpError::ToolFailed {
+                    tool: config.path.clone(),
+                    message: format!(
+                        "field(s) not found in {path} (expected: {})",
+                        dot_paths.join(", ")
+                    ),
+                });
+            } else {
+                warn!(%path, "field not found in globbed file, skipping");
+            }
+        }
+    }
+
+    Ok(modified_files)
+}
+
+// ──────────────────────────────────────────────
+// TOML (format-preserving via toml_edit)
+// ──────────────────────────────────────────────
+
 fn update_toml(path: &Utf8Path, dot_paths: &[&str], version: &str) -> BumpResult<bool> {
     let content = std::fs::read_to_string(path).map_err(|e| BumpError::ToolFailed {
         tool: path.to_string(),
@@ -601,5 +737,128 @@ mod tests {
         fs::write(&path, "---\nname: test\n---\n\n# Body\n").unwrap();
         let result = update_frontmatter(&path, &["metadata.version"], "1.0.0").unwrap();
         assert!(!result);
+    }
+
+    // ── Text updater ──────────────────────────────────────
+
+    #[test]
+    fn text_update_replaces_content() {
+        let tmp = TempDir::new().unwrap();
+        let path = Utf8PathBuf::try_from(tmp.path().join("VERSION")).unwrap();
+        fs::write(&path, "1.0.0\n").unwrap();
+        let result = update_text(&path, "2.0.0").unwrap();
+        assert!(result);
+        assert_eq!(fs::read_to_string(&path).unwrap(), "2.0.0\n");
+    }
+
+    // ── Orchestrator ──────────────────────────────────────
+
+    #[test]
+    fn orchestrator_explicit_missing_file_errors() {
+        let tmp = TempDir::new().unwrap();
+        let root = Utf8PathBuf::try_from(tmp.path().to_path_buf()).unwrap();
+        let configs = vec![VersionFileConfig {
+            path: "nonexistent.json".into(),
+            format: VersionFileFormat::Json,
+            field: Some("version".into()),
+            fields: None,
+        }];
+        let result = bump_version_files(&root, &configs, "1.0.0");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn orchestrator_glob_no_matches_warns() {
+        let tmp = TempDir::new().unwrap();
+        let root = Utf8PathBuf::try_from(tmp.path().to_path_buf()).unwrap();
+        let configs = vec![VersionFileConfig {
+            path: "skills/*/SKILL.md".into(),
+            format: VersionFileFormat::Frontmatter,
+            field: Some("metadata.version".into()),
+            fields: None,
+        }];
+        let modified = bump_version_files(&root, &configs, "1.0.0").unwrap();
+        assert!(modified.is_empty());
+    }
+
+    #[test]
+    fn orchestrator_glob_matches_and_updates() {
+        let tmp = TempDir::new().unwrap();
+        let root = Utf8PathBuf::try_from(tmp.path().to_path_buf()).unwrap();
+        let skill_a = tmp.path().join("skills/alpha");
+        let skill_b = tmp.path().join("skills/beta");
+        fs::create_dir_all(&skill_a).unwrap();
+        fs::create_dir_all(&skill_b).unwrap();
+        fs::write(
+            skill_a.join("SKILL.md"),
+            "---\nname: alpha\nmetadata:\n  version: \"1.0.0\"\n---\n\n# Alpha\n",
+        )
+        .unwrap();
+        fs::write(
+            skill_b.join("SKILL.md"),
+            "---\nname: beta\nmetadata:\n  version: \"1.0.0\"\n---\n\n# Beta\n",
+        )
+        .unwrap();
+        let configs = vec![VersionFileConfig {
+            path: "skills/*/SKILL.md".into(),
+            format: VersionFileFormat::Frontmatter,
+            field: Some("metadata.version".into()),
+            fields: None,
+        }];
+        let modified = bump_version_files(&root, &configs, "2.0.0").unwrap();
+        assert_eq!(modified.len(), 2);
+        assert!(
+            fs::read_to_string(skill_a.join("SKILL.md"))
+                .unwrap()
+                .contains("2.0.0")
+        );
+        assert!(
+            fs::read_to_string(skill_b.join("SKILL.md"))
+                .unwrap()
+                .contains("2.0.0")
+        );
+    }
+
+    #[test]
+    fn orchestrator_glob_skips_files_without_field() {
+        let tmp = TempDir::new().unwrap();
+        let root = Utf8PathBuf::try_from(tmp.path().to_path_buf()).unwrap();
+        let skill_a = tmp.path().join("skills/has-version");
+        let skill_b = tmp.path().join("skills/no-version");
+        fs::create_dir_all(&skill_a).unwrap();
+        fs::create_dir_all(&skill_b).unwrap();
+        fs::write(
+            skill_a.join("SKILL.md"),
+            "---\nname: has-version\nmetadata:\n  version: \"1.0.0\"\n---\n\n# A\n",
+        )
+        .unwrap();
+        fs::write(
+            skill_b.join("SKILL.md"),
+            "---\nname: no-version\n---\n\n# B\n",
+        )
+        .unwrap();
+        let configs = vec![VersionFileConfig {
+            path: "skills/*/SKILL.md".into(),
+            format: VersionFileFormat::Frontmatter,
+            field: Some("metadata.version".into()),
+            fields: None,
+        }];
+        let modified = bump_version_files(&root, &configs, "2.0.0").unwrap();
+        assert_eq!(modified.len(), 1);
+    }
+
+    #[test]
+    fn orchestrator_explicit_missing_field_errors() {
+        let tmp = TempDir::new().unwrap();
+        let root = Utf8PathBuf::try_from(tmp.path().to_path_buf()).unwrap();
+        fs::write(tmp.path().join("plugin.json"), r#"{"name": "test"}"#).unwrap();
+        let configs = vec![VersionFileConfig {
+            path: "plugin.json".into(),
+            format: VersionFileFormat::Json,
+            field: Some("version".into()),
+            fields: None,
+        }];
+        let result = bump_version_files(&root, &configs, "1.0.0");
+        assert!(result.is_err());
     }
 }
