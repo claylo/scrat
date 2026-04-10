@@ -84,6 +84,8 @@ pub struct ReadyBump {
     pub strategy: VersionStrategy,
     /// Detected ecosystem and tools.
     pub detection: ProjectDetection,
+    /// Additional files to update with the new version.
+    pub version_files: Vec<crate::config::VersionFileConfig>,
 }
 
 /// A bump plan that requires the user to pick a version interactively.
@@ -93,6 +95,8 @@ pub struct InteractiveBump {
     pub context: interactive::InteractiveContext,
     /// Detected ecosystem and tools.
     pub detection: ProjectDetection,
+    /// Additional files to update with the new version.
+    pub version_files: Vec<crate::config::VersionFileConfig>,
 }
 
 // ──────────────────────────────────────────────
@@ -123,6 +127,8 @@ pub fn plan_bump(
         )
     })?;
 
+    let version_files = config.version_files.clone().unwrap_or_default();
+
     // Step 2: Determine version strategy
     // CLI --version flag > config override > auto-detected
     let strategy = explicit_version.map_or_else(
@@ -142,6 +148,7 @@ pub fn plan_bump(
                 next,
                 strategy,
                 detection,
+                version_files,
             }))
         }
         VersionStrategy::ConventionalCommits { tool } => {
@@ -160,6 +167,7 @@ pub fn plan_bump(
                 next,
                 strategy: VersionStrategy::ConventionalCommits { tool },
                 detection,
+                version_files,
             }))
         }
         VersionStrategy::Interactive => {
@@ -167,6 +175,7 @@ pub fn plan_bump(
             Ok(BumpPlan::NeedsInteraction(InteractiveBump {
                 context,
                 detection,
+                version_files,
             }))
         }
     }
@@ -184,6 +193,7 @@ pub fn resolve_interactive(plan: InteractiveBump, chosen_version: Version) -> Re
         next: chosen_version,
         strategy: VersionStrategy::Interactive,
         detection: plan.detection,
+        version_files: plan.version_files,
     }
 }
 
@@ -275,6 +285,16 @@ impl ReadyBump {
             Ecosystem::Generic => {
                 debug!("generic ecosystem — no project files to bump");
             }
+        }
+
+        // Update configured version files
+        if !self.version_files.is_empty() {
+            let vf_modified = crate::version_files::bump_version_files(
+                project_root,
+                &self.version_files,
+                &self.next.to_string(),
+            )?;
+            modified_files.extend(vf_modified);
         }
 
         // Generate/update changelog (if requested and tool available)
@@ -501,6 +521,7 @@ mod tests {
         let plan = InteractiveBump {
             context,
             detection: generic_detection(),
+            version_files: vec![],
         };
 
         let ready = resolve_interactive(plan, Version::new(2, 0, 0));
@@ -520,6 +541,7 @@ mod tests {
         let plan = InteractiveBump {
             context,
             detection: generic_detection(),
+            version_files: vec![],
         };
 
         let ready = resolve_interactive(plan, Version::new(0, 1, 0));
@@ -674,6 +696,7 @@ mod tests {
             next: Version::new(0, 1, 0),
             strategy: VersionStrategy::Interactive,
             detection: generic_detection(),
+            version_files: vec![],
         };
 
         let outcome = ready.execute(root, false).unwrap();
@@ -693,6 +716,7 @@ mod tests {
             next: Version::new(1, 1, 0),
             strategy: VersionStrategy::Interactive,
             detection: generic_detection(),
+            version_files: vec![],
         };
 
         // Changelog requested but no tool available — should succeed with no changelog
@@ -723,6 +747,7 @@ mod tests {
             next: Version::new(1, 0, 1),
             strategy: VersionStrategy::Interactive,
             detection,
+            version_files: vec![],
         };
 
         let err = ready.execute(root, false).unwrap_err();
@@ -754,6 +779,7 @@ mod tests {
             next: Version::new(0, 2, 0),
             strategy: VersionStrategy::Interactive,
             detection,
+            version_files: vec![],
         };
 
         let err = ready.execute(root, false).unwrap_err();
@@ -818,6 +844,7 @@ mod tests {
             next: Version::new(1, 3, 0),
             strategy: VersionStrategy::Explicit("1.3.0".into()),
             detection: generic_detection(),
+            version_files: vec![],
         };
 
         let cloned = ready.clone();
@@ -923,5 +950,31 @@ mod tests {
 
         let result = plan_bump(root, &config, Some("not-semver"));
         assert!(result.is_err());
+    }
+
+    // ── version_files on ReadyBump ─────────────────────────
+
+    #[test]
+    fn ready_bump_carries_version_files() {
+        use crate::config::VersionFileConfig;
+        use crate::config::VersionFileFormat;
+
+        let vf = vec![VersionFileConfig {
+            path: "plugin.json".into(),
+            format: VersionFileFormat::Json,
+            field: Some("version".into()),
+            fields: None,
+        }];
+
+        let bump = ReadyBump {
+            previous: Version::new(1, 0, 0),
+            next: Version::new(2, 0, 0),
+            strategy: VersionStrategy::Interactive,
+            detection: generic_detection(),
+            version_files: vf.clone(),
+        };
+
+        assert_eq!(bump.version_files.len(), 1);
+        assert_eq!(bump.version_files[0].path, "plugin.json");
     }
 }
