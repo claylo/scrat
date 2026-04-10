@@ -1,0 +1,313 @@
+---
+audit_date: "2026-04-07"
+commit: 1613ff24f25e022df16c8bc330023141c4922ad2
+auditor: "claude-opus-4-6 (cased + crustoleum, 4 parallel agents)"
+scope: "Workspace crates: crates/scrat (CLI) and crates/scrat-core (library)"
+
+assessment: >-
+  scrat is a release management CLI tool built as a Rust workspace with a thin
+  CLI binary and a fat core library. The supply chain has one moderate finding:
+  figment's "yaml" feature drags the deprecated serde_yaml crate into the
+  dependency tree. Error handling is disciplined, API design is clean, and
+  performance is appropriate for a CLI tool. Remove the figment YAML feature,
+  and this is a well-structured codebase with no security concerns.
+
+summary:
+  counts:
+    critical: 0
+    significant: 0
+    moderate: 1
+    advisory: 2
+    note: 2
+
+narratives:
+  - slug: supply-chain-surface
+    title: "The Supply Chain Surface"
+    thesis: >-
+      A single figment feature flag pulls a deprecated, unsafe-containing
+      YAML library into the dependency tree, contradicting the project's
+      explicit dependency policy.
+    verdict: >-
+      The supply chain has one real issue: figment's "yaml" feature drags
+      serde_yaml (deprecated, archived upstream) and unsafe-libyaml into
+      the tree despite the project already using serde-saphyr for all YAML
+      work. Removing the feature flag is a one-line Cargo.toml change; the
+      harder part is building a thin figment Provider backed by serde-saphyr.
+      Audit tooling had environment issues that prevented full automated
+      scanning, but manual checks found no advisories.
+
+    flow:
+      - id: config-load
+        label: "Config requested"
+        type: start
+      - id: figment-merge
+        label: "Figment merges providers"
+        type: process
+        findings:
+          - slug: figment-yaml-pulls-deprecated-dep
+            label: "deprecated YAML backend"
+      - id: yaml-provider
+        label: "YAML file?"
+        type: decision
+        no: toml-provider
+      - id: serde-yaml-deser
+        label: "serde_yaml deserializes"
+        type: process
+        findings:
+          - slug: figment-yaml-pulls-deprecated-dep
+            label: "deprecated path"
+      - id: toml-provider
+        label: "TOML/JSON provider"
+        type: process
+        spine: false
+      - id: config-ready
+        label: "Config struct ready"
+        type: end
+
+    findings:
+      - slug: figment-yaml-pulls-deprecated-dep
+        title: "Figment 'yaml' feature pulls deprecated serde_yaml into dependency tree"
+        concern: moderate
+
+        locations:
+          - path: crates/scrat-core/Cargo.toml
+            start_line: 35
+            end_line: 35
+
+        evidence: |
+          figment = { version = "0.10", features = ["toml", "yaml", "json"] }
+
+        mechanism: |
+          Figment's "yaml" feature gates on serde_yaml as its YAML provider
+          backend. serde_yaml v0.9.34 is explicitly marked "+deprecated" in its
+          version string and archived upstream. Its sole dependency, unsafe-libyaml
+          v0.2.11, wraps C code and contains unsafe blocks. While the workspace-level
+          `unsafe_code = "deny"` lint prevents unsafe in project code, it does not
+          apply to external crates. The project already uses serde-saphyr (a pure-Rust
+          YAML library) as a direct dependency in the CLI crate, making the serde_yaml
+          transitive completely redundant. This contradicts the documented project
+          policy that lists serde_yaml as a disliked dependency.
+
+        remediation: |
+          Remove "yaml" from figment's feature list:
+            figment = { version = "0.10", features = ["toml", "json"] }
+          Then implement a custom figment::Provider backed by serde-saphyr
+          for YAML config file support. Alternatively, file a feature request
+          on figment for a serde-saphyr backend. The custom Provider approach
+          is straightforward: read the YAML file, deserialize with serde-saphyr
+          into a serde_json::Value, and feed it into figment.
+
+        temporal:
+          introduced: "2026-03-01"
+          last_modified: "2026-04-03"
+          commit_count: 12
+          monthly_commits: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 8, 1]
+
+        chains:
+          enables: []
+          enabled_by: []
+          related: []
+
+        effort: small
+        effort_notes: >-
+          One-line Cargo.toml change plus a ~30-line custom Provider
+          implementation. The Provider is boilerplate.
+
+      - slug: audit-tooling-incomplete
+        title: "Supply chain audit tools failed to run in automated scan"
+        concern: advisory
+
+        locations:
+          - path: .crustoleum/audit.txt
+            start_line: 1
+            end_line: 5
+          - path: .crustoleum/deny.txt
+            start_line: 1
+            end_line: 4
+          - path: .crustoleum/geiger.txt
+            start_line: 1
+            end_line: 10
+
+        evidence: |
+          # audit.txt
+          error: couldn't fetch advisory database: git operation failed
+          Caused by: Refusing to initialize the non-empty directory
+
+          # deny.txt
+          error: invalid value '.config/deny.toml' for '--color <COLOR>'
+
+          # geiger.txt
+          manifest path is a virtual manifest
+
+        mechanism: |
+          Three supply chain tools failed during the automated scan: cargo-audit
+          (stale advisory-db directory), cargo-deny (CLI argument ordering bug in
+          the runner script — config flag passed before subcommand), and
+          cargo-geiger (cannot run against virtual workspace manifests). When
+          cargo-deny is invoked correctly (`cargo deny check -c .config/deny.toml`),
+          all checks pass. The advisory database issue is an environment problem,
+          not a code issue. However, if these tools do not run reliably in CI,
+          the supply chain scanning is effectively absent.
+
+        remediation: |
+          Fix the cargo-deny invocation in the runner script. Clear the stale
+          advisory-db directory. For cargo-geiger, invoke per-crate instead of
+          against the workspace root. Consider adding these checks to CI so
+          they fail visibly rather than silently.
+
+        temporal:
+          introduced: "2026-04-07"
+          last_modified: "2026-04-07"
+          commit_count: 1
+          monthly_commits: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1]
+
+        chains:
+          enables: []
+          enabled_by: []
+          related: [figment-yaml-pulls-deprecated-dep]
+
+        effort: trivial
+        effort_notes: "Runner script fix and env cleanup."
+
+  - slug: dependency-fitness-surface
+    title: "The Dependency Fitness Surface"
+    thesis: >-
+      Dependency choices are well-matched to the project's needs, with two
+      minor hygiene items: a redundant manifest entry and a library-to-CLI
+      framework coupling.
+    verdict: >-
+      The dependency tree is lean for a CLI tool of this scope: no async
+      runtime, no HTTP client, no image processing. 149 transitive crates
+      is reasonable. The two findings are architectural cleanliness items,
+      not risks. Both are low-effort fixes that would tighten the
+      dependency graph without changing behavior.
+
+    findings:
+      - slug: directories-redundant-in-cli
+        title: "directories crate declared in CLI Cargo.toml but unused"
+        concern: note
+
+        locations:
+          - path: crates/scrat/Cargo.toml
+            start_line: 55
+            end_line: 55
+
+        evidence: |
+          directories = "6.0"
+
+        mechanism: |
+          The CLI crate declares directories as a direct dependency, but has
+          zero `use directories` statements in its source code. All directory
+          resolution (XDG config, cache, data, log paths) happens in scrat-core's
+          config.rs and observability.rs modules. Cargo deduplicates the version
+          so there is no binary size impact, but it is dead manifest weight that
+          could confuse future contributors. cargo-machete correctly flagged
+          this; cargo-udeps did not (udeps considers workspace-level usage).
+
+        remediation: |
+          Remove `directories = "6.0"` from crates/scrat/Cargo.toml.
+
+        temporal:
+          introduced: "2026-03-01"
+          last_modified: "2026-03-15"
+          commit_count: 2
+          monthly_commits: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2, 0]
+
+        chains:
+          enables: []
+          enabled_by: []
+          related: []
+
+        effort: trivial
+        effort_notes: "Delete one line from Cargo.toml."
+
+      - slug: clap-in-library-crate
+        title: "clap dependency in scrat-core used only for two ValueEnum derives"
+        concern: advisory
+
+        locations:
+          - path: crates/scrat-core/Cargo.toml
+            start_line: 33
+            end_line: 33
+          - path: crates/scrat-core/src/init.rs
+            start_line: 31
+            end_line: 41
+
+        evidence: |
+          # Cargo.toml
+          clap = { version = "4.6", features = ["derive"] }
+
+          # init.rs
+          #[derive(Debug, Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
+          pub enum ConfigFormat { Toml, Yaml }
+
+          #[derive(Debug, Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
+          pub enum ConfigStyle { Minimal, Documented }
+
+        mechanism: |
+          scrat-core is a library crate that depends on clap (a CLI framework)
+          solely for two `#[derive(clap::ValueEnum)]` annotations on enums in
+          init.rs. This couples the library to a CLI framework, which is an
+          architectural smell. Since the CLI crate also depends on clap, the
+          compile cost is shared and there is zero marginal build time impact.
+          However, any downstream consumer of scrat-core that does not use clap
+          would inherit the dependency unnecessarily.
+
+        remediation: |
+          Replace the clap::ValueEnum derives with manual FromStr/Display
+          implementations, or move the ValueEnum derivation to the CLI crate
+          side. The core types can remain plain enums. Alternatively, accept
+          the coupling and document the rationale — the compile cost is zero
+          marginal since clap is already in the tree.
+
+        temporal:
+          introduced: "2026-03-15"
+          last_modified: "2026-03-20"
+          commit_count: 4
+          monthly_commits: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 4, 0]
+
+        chains:
+          enables: []
+          enabled_by: []
+          related: []
+
+        effort: small
+        effort_notes: >-
+          ~20 lines to replace two derives with manual FromStr impls
+          plus CLI-side glue.
+
+  - slug: error-handling-surface
+    title: "The Error Handling Surface"
+    thesis: >-
+      Error handling is disciplined and well-structured, with typed errors
+      throughout the library and zero panic-capable patterns reachable from
+      production code paths.
+    verdict: >-
+      This surface is clean. Seven typed error enums with thiserror, consistent
+      ? propagation, no production unwrap/expect on external input, and every
+      silent discard documented with a justifying comment. The three production
+      expect() calls are on compile-time invariants (clap derive consistency,
+      hardcoded template string). The ASAN/TSAN test failures are test
+      infrastructure issues (set_current_dir in tempdir cleanup) and a known
+      Apple Silicon sanitizer false positive on global AtomicBool, not
+      production code bugs.
+
+    findings: []
+
+  - slug: api-and-performance-surface
+    title: "The API Design and Performance Surface"
+    thesis: >-
+      The ownership model, lifetime usage, trait design, and performance
+      characteristics are all appropriate for a CLI tool that delegates
+      heavy work to subprocesses.
+    verdict: >-
+      All 16 API design criteria pass. No custom traits — all polymorphism
+      via enums with exhaustive match, which is correct for a closed set
+      of ecosystems. The plan/execute pattern (BumpPlan, ShipPlan) enforces
+      workflow state at the type level. Performance is irrelevant in the
+      traditional sense: every scrat operation is dominated by subprocess
+      I/O (git, git-cliff, gh, cargo each take 50-500ms) while all Rust
+      code runs in single-digit milliseconds. No allocations in loops, no
+      regex, no async overhead. Zero findings warrant code changes.
+
+    findings: []
