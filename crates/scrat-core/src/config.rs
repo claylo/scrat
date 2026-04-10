@@ -229,24 +229,105 @@ pub struct ShipConfig {
     pub no_tag: Option<bool>,
     /// Skip entire git phase — commit, tag, push (equivalent to `--no-git`).
     pub no_git: Option<bool>,
+    /// Skip `git fetch` during preflight (equivalent to `--no-fetch`).
+    pub no_fetch: Option<bool>,
 }
 
 /// Configuration for a version file to update during bump.
 ///
 /// Each entry describes a file (or glob pattern) containing a version string
 /// that scrat should update when bumping the project version.
-#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
+///
+/// The optional [`VersionFields`] is an enum so the `field` / `fields`
+/// distinction is enforced at the type level — you cannot construct a
+/// `VersionFileConfig` that uses both at once. Custom (de)serializers
+/// keep the YAML/TOML config syntax (`field: "..."` or `fields: [...]`)
+/// backward compatible, and the deserializer rejects configs that supply
+/// both with a clear error.
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct VersionFileConfig {
     /// File path relative to project root. Supports globs (`*`, `**`).
     pub path: String,
     /// File format — determines how the file is parsed and updated.
     pub format: VersionFileFormat,
-    /// Dot-path to the version field (e.g., `"version"`, `"metadata.version"`).
-    /// Mutually exclusive with `fields`.
-    pub field: Option<String>,
-    /// Multiple dot-paths to update in one file.
-    /// Mutually exclusive with `field`.
-    pub fields: Option<Vec<String>>,
+    /// One or more dot-paths to update. `None` for `text` format
+    /// (the entire file is the version).
+    pub fields: Option<VersionFields>,
+}
+
+/// Dot-path(s) to the version field(s) inside a [`VersionFileConfig`].
+///
+/// The variants enforce that exactly one of `field` or `fields` is in
+/// effect — there is no representation that allows both simultaneously.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum VersionFields {
+    /// A single dot-path (config: `field: "version"`).
+    Single(String),
+    /// Multiple dot-paths (config: `fields: ["a", "b"]`).
+    Multiple(Vec<String>),
+}
+
+impl VersionFields {
+    /// Iterate over the dot-paths regardless of variant.
+    pub fn paths(&self) -> Box<dyn Iterator<Item = &str> + '_> {
+        match self {
+            Self::Single(s) => Box::new(std::iter::once(s.as_str())),
+            Self::Multiple(v) => Box::new(v.iter().map(String::as_str)),
+        }
+    }
+}
+
+impl<'de> Deserialize<'de> for VersionFileConfig {
+    fn deserialize<D>(de: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        #[derive(Deserialize)]
+        struct Helper {
+            path: String,
+            format: VersionFileFormat,
+            #[serde(default)]
+            field: Option<String>,
+            #[serde(default)]
+            fields: Option<Vec<String>>,
+        }
+        let h = Helper::deserialize(de)?;
+        let fields = match (h.field, h.fields) {
+            (Some(_), Some(_)) => {
+                return Err(serde::de::Error::custom(format!(
+                    "version_file `{}`: `field` and `fields` are mutually exclusive",
+                    h.path
+                )));
+            }
+            (Some(f), None) => Some(VersionFields::Single(f)),
+            (None, Some(fs)) => Some(VersionFields::Multiple(fs)),
+            (None, None) => None,
+        };
+        Ok(Self {
+            path: h.path,
+            format: h.format,
+            fields,
+        })
+    }
+}
+
+impl Serialize for VersionFileConfig {
+    fn serialize<S>(&self, ser: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        use serde::ser::SerializeMap;
+        let entries = if self.fields.is_some() { 3 } else { 2 };
+        let mut map = ser.serialize_map(Some(entries))?;
+        map.serialize_entry("path", &self.path)?;
+        map.serialize_entry("format", &self.format)?;
+        match &self.fields {
+            Some(VersionFields::Single(f)) => map.serialize_entry("field", f)?,
+            Some(VersionFields::Multiple(fs)) => map.serialize_entry("fields", fs)?,
+            None => {}
+        }
+        map.end()
+    }
 }
 
 /// Supported file formats for version files.
@@ -1185,15 +1266,46 @@ format = "text"
         assert_eq!(vf.len(), 3);
         assert_eq!(vf[0].path, ".claude-plugin/plugin.json");
         assert!(matches!(vf[0].format, VersionFileFormat::Json));
-        assert_eq!(vf[0].field.as_deref(), Some("version"));
-        assert!(vf[0].fields.is_none());
+        assert!(matches!(
+            vf[0].fields,
+            Some(VersionFields::Single(ref s)) if s == "version"
+        ));
 
-        assert_eq!(vf[1].fields.as_ref().unwrap().len(), 2);
-        assert!(vf[1].field.is_none());
+        assert!(matches!(
+            vf[1].fields,
+            Some(VersionFields::Multiple(ref v)) if v.len() == 2
+        ));
 
         assert!(matches!(vf[2].format, VersionFileFormat::Text));
-        assert!(vf[2].field.is_none());
         assert!(vf[2].fields.is_none());
+    }
+
+    #[test]
+    fn version_file_field_and_fields_conflict_rejected() {
+        let tmp = TempDir::new().unwrap();
+        let config_path = tmp.path().join("config.toml");
+        fs::write(
+            &config_path,
+            r#"
+[[version_files]]
+path = "plugin.json"
+format = "json"
+field = "version"
+fields = ["other.version"]
+"#,
+        )
+        .unwrap();
+        let config_path = Utf8PathBuf::try_from(config_path).unwrap();
+        let result = ConfigLoader::new()
+            .with_user_config(false)
+            .with_file(&config_path)
+            .load();
+        assert!(result.is_err(), "expected mutual exclusion error");
+        let err = result.unwrap_err().to_string();
+        assert!(
+            err.contains("mutually exclusive"),
+            "expected 'mutually exclusive' in error, got: {err}"
+        );
     }
 
     #[test]

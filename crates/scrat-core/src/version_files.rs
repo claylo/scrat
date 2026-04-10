@@ -378,20 +378,17 @@ fn update_text(path: &Utf8Path, version: &str) -> BumpResult<bool> {
 // ──────────────────────────────────────────────
 
 fn validate_config(config: &VersionFileConfig) -> BumpResult<()> {
-    if config.field.is_some() && config.fields.is_some() {
-        return Err(BumpError::ToolFailed {
-            tool: config.path.clone(),
-            message: "`field` and `fields` are mutually exclusive".into(),
-        });
-    }
+    // The field/fields mutual exclusion is now type-enforced via
+    // `VersionFields`, so the only validation left is whether the
+    // format requires fields at all.
     if config.format == VersionFileFormat::Text {
-        if config.field.is_some() || config.fields.is_some() {
+        if config.fields.is_some() {
             return Err(BumpError::ToolFailed {
                 tool: config.path.clone(),
                 message: "`text` format does not use `field` or `fields`".into(),
             });
         }
-    } else if config.field.is_none() && config.fields.is_none() {
+    } else if config.fields.is_none() {
         return Err(BumpError::ToolFailed {
             tool: config.path.clone(),
             message: "non-text formats require `field` or `fields`".into(),
@@ -434,15 +431,11 @@ fn resolve_paths(root: &Utf8Path, path_pattern: &str) -> BumpResult<(Vec<Utf8Pat
 }
 
 fn collect_dot_paths(config: &VersionFileConfig) -> Vec<&str> {
-    config.field.as_ref().map_or_else(
-        || {
-            config
-                .fields
-                .as_ref()
-                .map_or_else(Vec::new, |fs| fs.iter().map(|s| s.as_str()).collect())
-        },
-        |f| vec![f.as_str()],
-    )
+    config
+        .fields
+        .as_ref()
+        .map(|f| f.paths().collect())
+        .unwrap_or_default()
 }
 
 /// Update version in all configured version files.
@@ -497,6 +490,7 @@ pub fn bump_version_files(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::config::VersionFields;
 
     #[test]
     fn parse_simple_key() {
@@ -753,8 +747,7 @@ mod tests {
         let configs = vec![VersionFileConfig {
             path: "nonexistent.json".into(),
             format: VersionFileFormat::Json,
-            field: Some("version".into()),
-            fields: None,
+            fields: Some(VersionFields::Single("version".into())),
         }];
         let result = bump_version_files(&root, &configs, "1.0.0");
         assert!(result.is_err());
@@ -767,8 +760,7 @@ mod tests {
         let configs = vec![VersionFileConfig {
             path: "skills/*/SKILL.md".into(),
             format: VersionFileFormat::Frontmatter,
-            field: Some("metadata.version".into()),
-            fields: None,
+            fields: Some(VersionFields::Single("metadata.version".into())),
         }];
         let modified = bump_version_files(&root, &configs, "1.0.0").unwrap();
         assert!(modified.is_empty());
@@ -795,8 +787,7 @@ mod tests {
         let configs = vec![VersionFileConfig {
             path: "skills/*/SKILL.md".into(),
             format: VersionFileFormat::Frontmatter,
-            field: Some("metadata.version".into()),
-            fields: None,
+            fields: Some(VersionFields::Single("metadata.version".into())),
         }];
         let modified = bump_version_files(&root, &configs, "2.0.0").unwrap();
         assert_eq!(modified.len(), 2);
@@ -833,8 +824,7 @@ mod tests {
         let configs = vec![VersionFileConfig {
             path: "skills/*/SKILL.md".into(),
             format: VersionFileFormat::Frontmatter,
-            field: Some("metadata.version".into()),
-            fields: None,
+            fields: Some(VersionFields::Single("metadata.version".into())),
         }];
         let modified = bump_version_files(&root, &configs, "2.0.0").unwrap();
         assert_eq!(modified.len(), 1);
@@ -848,8 +838,7 @@ mod tests {
         let configs = vec![VersionFileConfig {
             path: "plugin.json".into(),
             format: VersionFileFormat::Json,
-            field: Some("version".into()),
-            fields: None,
+            fields: Some(VersionFields::Single("version".into())),
         }];
         let result = bump_version_files(&root, &configs, "1.0.0");
         assert!(result.is_err());

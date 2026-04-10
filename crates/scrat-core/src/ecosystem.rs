@@ -143,6 +143,20 @@ pub enum VersionStrategy {
     Explicit(String),
 }
 
+impl VersionStrategy {
+    /// The changelog tool associated with this strategy, if any.
+    ///
+    /// Conventional-commit strategies carry their tool directly;
+    /// interactive and explicit strategies don't imply a changelog tool.
+    #[must_use]
+    pub const fn changelog_tool(&self) -> Option<ChangelogTool> {
+        match self {
+            Self::ConventionalCommits { tool } => Some(*tool),
+            Self::Interactive | Self::Explicit(_) => None,
+        }
+    }
+}
+
 impl fmt::Display for VersionStrategy {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {

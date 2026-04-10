@@ -51,6 +51,22 @@ pub fn run_preflight(
     config: &Config,
     ship_options: Option<&ShipOptions>,
 ) -> PreflightReport {
+    let detection = detect::resolve_detection(project_root, config);
+    run_preflight_with_detection(project_root, config, ship_options, detection)
+}
+
+/// Run preflight with a pre-computed [`ProjectDetection`].
+///
+/// Equivalent to [`run_preflight`] but skips the detection phase. Used by
+/// [`crate::ship::plan_ship`] to avoid scanning marker files and probing
+/// `PATH` twice in a single ship run.
+#[instrument(skip(config, ship_options, detection), fields(root = %project_root))]
+pub fn run_preflight_with_detection(
+    project_root: &camino::Utf8Path,
+    config: &Config,
+    ship_options: Option<&ShipOptions>,
+    detection: Option<ProjectDetection>,
+) -> PreflightReport {
     let mut checks = Vec::new();
 
     // Check 1: Inside a git repo
@@ -77,11 +93,11 @@ pub fn run_preflight(
         .and_then(|p| p.release_branch.as_deref());
     checks.push(check_release_branch(release_branch_override));
 
-    // Check 4: Remote in sync
-    checks.push(check_remote_sync());
+    // Check 4: Remote in sync (honor --no-fetch to skip the network round-trip)
+    let fetch_remote = !ship_options.is_some_and(|o| o.no_fetch);
+    checks.push(check_remote_sync(fetch_remote));
 
-    // Check 5: Ecosystem detection (config override > auto-detect)
-    let detection = detect::resolve_detection(project_root, config);
+    // Check 5: Ecosystem detection (from pre-computed detection or None)
     checks.push(check_ecosystem(&detection));
 
     // Check 6: Required tools
@@ -235,19 +251,23 @@ fn check_release_branch(override_branch: Option<&str>) -> CheckResult {
     }
 }
 
-fn check_remote_sync() -> CheckResult {
-    match git::is_remote_in_sync() {
+fn check_remote_sync(fetch_remote: bool) -> CheckResult {
+    match git::is_remote_in_sync(fetch_remote) {
         Ok(true) => CheckResult {
             name: "Remote sync".into(),
             passed: true,
-            message: "Local branch is in sync with remote".into(),
+            message: if fetch_remote {
+                "Local branch is in sync with remote".into()
+            } else {
+                "Local branch is in sync with cached remote (--no-fetch)".into()
+            },
             skip_flag: None,
         },
         Ok(false) => CheckResult {
             name: "Remote sync".into(),
             passed: false,
             message: "Local branch is out of sync with remote (pull or push needed)".into(),
-            skip_flag: None,
+            skip_flag: Some("--no-fetch".into()),
         },
         Err(e) => CheckResult {
             name: "Remote sync".into(),
@@ -1031,7 +1051,8 @@ mod tests {
 
     #[test]
     fn check_remote_sync_runs_without_panic() {
-        let result = check_remote_sync();
+        // Use no-fetch form to avoid touching the network from tests
+        let result = check_remote_sync(false);
         assert_eq!(result.name, "Remote sync");
         assert!(!result.message.is_empty());
     }

@@ -25,7 +25,15 @@ use crate::hooks::HookContext;
 /// Constructed at the start of `ReadyShip::execute()` from the resolved
 /// bump plan and project detection. Phase methods (`record_bump`,
 /// `record_git`, `record_release`) fill in results as the pipeline runs.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+///
+/// `PartialEq` is derived (but not `Eq`) so library consumers can compare
+/// contexts in tests; `Eq` is impossible because `metadata` may contain
+/// `serde_json::Value::Number` (which wraps `f64`).
+#[expect(
+    clippy::derive_partial_eq_without_eq,
+    reason = "metadata holds serde_json::Value, which wraps f64 — Eq is unsound"
+)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct PipelineContext {
     // ── Version ──
     /// The new version being released (e.g., `"1.2.3"`).
@@ -94,7 +102,7 @@ pub struct PipelineContext {
 }
 
 /// Release statistics gathered from git between two refs.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ReleaseStats {
     /// Number of commits in the release.
     pub commit_count: usize,
@@ -109,7 +117,7 @@ pub struct ReleaseStats {
 }
 
 /// A contributor to the release.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Contributor {
     /// Contributor name (from git shortlog).
     pub name: String,
@@ -118,7 +126,7 @@ pub struct Contributor {
 }
 
 /// A dependency change between two versions.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct DepChange {
     /// Dependency name.
     pub name: String,
@@ -135,6 +143,7 @@ pub struct DepChange {
 /// Arguments for constructing a [`PipelineContext`].
 ///
 /// Keeps the constructor call site readable without a 15-argument function.
+#[derive(Debug, Clone)]
 pub struct PipelineContextInit {
     /// New version string.
     pub version: String,

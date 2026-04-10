@@ -6,33 +6,29 @@ use camino::Utf8Path;
 use tracing::debug;
 
 use super::has_binary;
-use crate::ecosystem::{
-    ChangelogTool, DetectedTools, Ecosystem, ProjectDetection, VersionStrategy,
-};
+use crate::ecosystem::{DetectedTools, Ecosystem, ProjectDetection, VersionStrategy};
 
 /// Detect Rust project tooling and build a [`ProjectDetection`].
 pub(super) fn detect_rust(
-    project_root: &Utf8Path,
+    _project_root: &Utf8Path,
     version_strategy: VersionStrategy,
 ) -> ProjectDetection {
+    let has_cargo = has_binary("cargo");
     let has_nextest = has_binary("cargo-nextest");
     let has_cargo_edit = has_binary("cargo-set-version");
 
-    debug!(has_nextest, has_cargo_edit, "probed Rust tools");
+    debug!(has_cargo, has_nextest, has_cargo_edit, "probed Rust tools");
 
     let test_cmd = if has_nextest {
         "cargo nextest run".into()
-    } else {
+    } else if has_cargo {
         "cargo test".into()
-    };
-
-    let bump_cmd = if has_cargo_edit {
-        Some("cargo set-version".into())
     } else {
-        None
+        String::new()
     };
 
-    let changelog_tool = detect_changelog_tool(project_root);
+    let bump_cmd = has_cargo_edit.then(|| "cargo set-version".to_string());
+    let changelog_tool = version_strategy.changelog_tool();
 
     ProjectDetection {
         ecosystem: Ecosystem::Rust,
@@ -40,25 +36,17 @@ pub(super) fn detect_rust(
         tools: DetectedTools {
             test_cmd,
             build_cmd: "cargo build --release".into(),
-            publish_cmd: Some("cargo publish".into()),
+            publish_cmd: has_cargo.then(|| "cargo publish".to_string()),
             bump_cmd,
             changelog_tool,
         },
     }
 }
 
-/// Check which changelog tool is available for this project.
-fn detect_changelog_tool(_project_root: &Utf8Path) -> Option<ChangelogTool> {
-    if super::has_binary("git-cliff") {
-        Some(ChangelogTool::GitCliff)
-    } else {
-        None
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::ecosystem::ChangelogTool;
     use std::fs;
     use tempfile::TempDir;
 
@@ -74,28 +62,23 @@ mod tests {
         let det = detect_rust(utf8_tmp(&tmp), VersionStrategy::Interactive);
         assert_eq!(det.ecosystem, Ecosystem::Rust);
         assert_eq!(det.tools.build_cmd, "cargo build --release");
-        assert_eq!(det.tools.publish_cmd.as_deref(), Some("cargo publish"));
+        // publish_cmd depends on whether cargo is on PATH in the test env
     }
 
     #[test]
-    fn rust_changelog_tool_when_git_cliff_available() {
+    fn rust_changelog_tool_wired_from_strategy() {
         let tmp = TempDir::new().unwrap();
-        let tool = detect_changelog_tool(utf8_tmp(&tmp));
-        if super::has_binary("git-cliff") {
-            assert_eq!(tool, Some(ChangelogTool::GitCliff));
-        } else {
-            assert_eq!(tool, None);
-        }
+        let strategy = VersionStrategy::ConventionalCommits {
+            tool: ChangelogTool::GitCliff,
+        };
+        let det = detect_rust(utf8_tmp(&tmp), strategy);
+        assert_eq!(det.tools.changelog_tool, Some(ChangelogTool::GitCliff));
     }
 
     #[test]
-    fn rust_no_changelog_tool_when_nothing_available() {
+    fn rust_interactive_strategy_has_no_changelog_tool() {
         let tmp = TempDir::new().unwrap();
-        let tool = detect_changelog_tool(utf8_tmp(&tmp));
-        if super::has_binary("git-cliff") {
-            assert_eq!(tool, Some(ChangelogTool::GitCliff));
-        } else {
-            assert_eq!(tool, None);
-        }
+        let det = detect_rust(utf8_tmp(&tmp), VersionStrategy::Interactive);
+        assert_eq!(det.tools.changelog_tool, None);
     }
 }

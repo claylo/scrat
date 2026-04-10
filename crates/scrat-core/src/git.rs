@@ -77,11 +77,16 @@ pub fn detect_release_branch() -> GitResult<Option<String>> {
 
 /// Check whether the local branch is in sync with its remote tracking branch.
 ///
+/// When `fetch_remote` is true, runs `git fetch --quiet` first to update
+/// remote-tracking refs (network round-trip, up to several seconds on
+/// slow networks). When false, compares against whatever the local repo
+/// has cached — fast, but may miss recent remote updates.
+///
 /// Returns `true` if there are no unpulled or unpushed commits.
 /// Returns `true` if there is no upstream configured (nothing to be out-of-sync with).
 #[instrument]
 #[expect(clippy::literal_string_with_formatting_args)]
-pub fn is_remote_in_sync() -> GitResult<bool> {
+pub fn is_remote_in_sync(fetch_remote: bool) -> GitResult<bool> {
     // Get the upstream tracking ref — @{upstream} is a git refspec, not a format arg
     let upstream = git(&["rev-parse", "--abbrev-ref", "@{upstream}"]);
     let Ok(upstream) = upstream else {
@@ -91,8 +96,16 @@ pub fn is_remote_in_sync() -> GitResult<bool> {
     };
     let upstream = upstream.trim();
 
-    // Fetch to get latest remote state (non-fatal if it fails)
-    let _ = git(&["fetch", "--quiet"]);
+    if fetch_remote {
+        // Fetch to get latest remote state (non-fatal if it fails — network
+        // outage, SSH key issue, etc.). We log at debug so the degraded check
+        // leaves a trail when it matters.
+        if let Err(e) = git(&["fetch", "--quiet"]) {
+            debug!(error = %e, "fetch failed, comparing against cached remote state");
+        }
+    } else {
+        debug!("skipping remote fetch (--no-fetch)");
+    }
 
     // Compare local HEAD with upstream
     let local = git(&["rev-parse", "HEAD"])?.trim().to_string();

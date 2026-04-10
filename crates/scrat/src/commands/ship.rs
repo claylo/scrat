@@ -57,6 +57,11 @@ pub struct ShipArgs {
     #[arg(long)]
     pub no_git: bool,
 
+    /// Skip `git fetch` during preflight (faster startup, may miss
+    /// recent remote changes)
+    #[arg(long)]
+    pub no_fetch: bool,
+
     /// Create release as draft (overrides config)
     #[arg(long, conflicts_with = "no_draft")]
     pub draft: bool,
@@ -113,6 +118,7 @@ pub fn cmd_ship(
         no_test: args.no_test || ship_cfg.and_then(|s| s.no_test).unwrap_or(false),
         no_tag: args.no_tag || ship_cfg.and_then(|s| s.no_tag).unwrap_or(false),
         no_git: args.no_git || ship_cfg.and_then(|s| s.no_git).unwrap_or(false),
+        no_fetch: args.no_fetch || ship_cfg.and_then(|s| s.no_fetch).unwrap_or(false),
         draft_override,
     };
 
@@ -249,7 +255,7 @@ fn handle_event(event: ShipEvent, is_dry: bool) {
             let spinner = ProgressBar::new_spinner();
             spinner.set_style(
                 ProgressStyle::with_template("  {spinner:.cyan} {msg}")
-                    .unwrap()
+                    .expect("valid spinner template")
                     .tick_strings(&["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"]),
             );
             spinner.set_message(format!("{phase}..."));

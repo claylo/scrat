@@ -3,7 +3,7 @@
 [![CI](https://github.com/claylo/scrat/actions/workflows/ci.yml/badge.svg)](https://github.com/claylo/scrat/actions/workflows/ci.yml)
 [![Crates.io](https://img.shields.io/crates/v/scrat.svg)](https://crates.io/crates/scrat)
 [![docs.rs](https://docs.rs/scrat/badge.svg)](https://docs.rs/scrat)
-[![MSRV](https://img.shields.io/badge/MSRV-1.89.0-blue.svg)](https://github.com/claylo/scrat)
+[![MSRV](https://img.shields.io/badge/MSRV-1.94.1-blue.svg)](https://github.com/claylo/scrat)
 
 **Release management tooling focused on sanity retention.**
 
@@ -124,16 +124,18 @@ interactive or explicit strategy.
 ### 3. Test
 
 Runs your test suite.
-The command is auto-detected per ecosystem:
+The command is auto-detected per ecosystem by probing `PATH` for the
+relevant binaries — the table shows the preferred command, with the
+fallback in parentheses where applicable.
 
-| Ecosystem | Detected Via | Default Command |
-|-----------|-------------|----------------|
-| Rust | `Cargo.toml` | `cargo test` |
-| Node | `package.json` | `npm test` |
+| Ecosystem | Detected Via | Detected Command |
+|-----------|-------------|------------------|
+| Rust | `Cargo.toml` | `cargo nextest run` (falls back to `cargo test`) |
+| Node | `package.json` | `pnpm test` > `yarn test` > `npm test` |
 | Go | `go.mod` | `go test ./...` |
 | PHP | `composer.json` | `composer test` |
-| Python | `pyproject.toml` | `pytest` |
-| Ruby | `Gemfile` | `bundle exec rake test` |
+| Python | `pyproject.toml` | `uv run pytest` (falls back to `pytest`) |
+| Ruby | `Gemfile` | `bundle exec rake test` (or `rake test` without Bundler) |
 | Swift | `Package.swift` | `swift test` |
 | Generic | (manual selection) | (none — set `commands.test`) |
 
@@ -144,13 +146,21 @@ Skip with `--no-test`.
 
 Updates version numbers in project files and generates the changelog.
 
-- Writes the new version to `Cargo.toml` (Rust), `package.json` (Node),
-  `composer.json` (PHP), or `pyproject.toml` (Python) — only if
-  a version field already exists in the file
-- Go, Swift, and Ruby skip version-file rewrite (version lives in git tags
-  or ecosystem-specific files like `version.rb`)
-- Runs `git-cliff` to update `CHANGELOG.md`
-- Reports which files were modified
+| Ecosystem | Files written |
+|-----------|---------------|
+| Rust | `Cargo.toml` (always — via `cargo set-version`) |
+| Node | `package.json` (direct `serde_json` edit; lockfile sync is your package manager's job) |
+| PHP | `composer.json` (only if a `version` field already exists) |
+| Python | `pyproject.toml` (only if a `[project] version` field already exists) |
+| Ruby | `lib/**/version.rb` (`VERSION = "..."` literals) and `*.gemspec` (literal `<spec>.version = "..."` assignments — constant references like `MyGem::VERSION` are left alone) |
+| Go, Swift | (none — version lives in the git tag) |
+| Generic | (none) |
+
+For any ecosystem you can also declare additional `[[version_files]]` in
+config to update arbitrary JSON, TOML, YAML, frontmatter, or plain-text
+files that hold a version string.
+
+After file writes, scrat runs `git-cliff` to regenerate `CHANGELOG.md`.
 
 Skip changelog generation with `--no-changelog`.
 Run `scrat bump` standalone to bump without shipping.
@@ -167,7 +177,7 @@ Diffs lockfiles between the previous tag and HEAD to find what changed.
 | PHP | `composer.lock` | State machine over JSON `"name"`/`"version"` pairs |
 | Ruby | `Gemfile.lock` | Collect-and-merge on 4-space-indent gem lines |
 | Swift | `Package.resolved` | JSON state machine on `"identity"`/`"version"` |
-| Node | `package-lock.json` | (stub — returns empty, full parser planned) |
+| Node | `package-lock.json` | JSON state machine on lockfile v2/v3 (top-level deps only — nested dedup entries are skipped) |
 | Generic | (none) | Skipped |
 
 All parsers work on `git diff` output—not the full lockfile—so they're fast
@@ -248,11 +258,11 @@ Override draft behavior with `--draft` / `--no-draft`.
 Publishes to a package registry.
 Auto-detected:
 
-| Ecosystem | Default Command |
-|-----------|----------------|
+| Ecosystem | Detected Command |
+|-----------|------------------|
 | Rust | `cargo publish` |
-| Node | `npm publish` |
-| Python | `twine upload dist/*` |
+| Node | `pnpm publish` > `yarn publish` > `npm publish` |
+| Python | `uv publish` (falls back to `twine upload dist/*`) |
 | Ruby | `gem push` |
 | Go | (none — Go modules publish via `git push`) |
 | Swift | (none — Swift packages distribute via git URLs) |
@@ -418,6 +428,7 @@ log_level = "info"
 # no_test = false
 # no_tag = false
 # no_git = false
+# no_fetch = false
 ```
 
 
@@ -528,6 +539,7 @@ assets = ["dist/release-card.png"]
 | `--no-push` | Git push (still commits and tags locally) |
 | `--no-git` | Entire git phase (commit, tag, push) |
 | `--no-release` | GitHub release creation |
+| `--no-fetch` | `git fetch` during preflight (faster startup, may miss recent remote changes) |
 
 **Other options:**
 
