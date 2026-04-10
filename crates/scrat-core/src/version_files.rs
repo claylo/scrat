@@ -45,34 +45,26 @@ fn apply_dot_path_json(
     match segments {
         [] => false,
         [DotSegment::Key(key)] => {
-            if let Some(existing) = value.get(key) {
-                if existing.is_string() {
-                    value[key.as_str()] = serde_json::Value::String(version.to_owned());
-                    return true;
-                }
+            if let Some(existing) = value.get(key)
+                && existing.is_string()
+            {
+                value[key.as_str()] = serde_json::Value::String(version.to_owned());
+                return true;
             }
             false
         }
-        [DotSegment::Key(key), rest @ ..] => {
-            if let Some(child) = value.get_mut(key.as_str()) {
-                apply_dot_path_json(child, rest, version)
-            } else {
-                false
-            }
-        }
-        [DotSegment::Wildcard, rest @ ..] => {
-            if let Some(arr) = value.as_array_mut() {
-                let mut any = false;
-                for elem in arr.iter_mut() {
-                    if apply_dot_path_json(elem, rest, version) {
-                        any = true;
-                    }
+        [DotSegment::Key(key), rest @ ..] => value
+            .get_mut(key.as_str())
+            .is_some_and(|child| apply_dot_path_json(child, rest, version)),
+        [DotSegment::Wildcard, rest @ ..] => value.as_array_mut().is_some_and(|arr| {
+            let mut any = false;
+            for elem in arr.iter_mut() {
+                if apply_dot_path_json(elem, rest, version) {
+                    any = true;
                 }
-                any
-            } else {
-                false
             }
-        }
+            any
+        }),
     }
 }
 
@@ -181,10 +173,10 @@ fn split_frontmatter(content: &str) -> Option<(FrontmatterDelim, &str, &str)> {
 
     // Skip past the opening delimiter line
     let after_open = &content[marker.len()..];
-    let after_open = if after_open.starts_with('\n') {
-        &after_open[1..]
-    } else if after_open.starts_with("\r\n") {
-        &after_open[2..]
+    let after_open = if let Some(stripped) = after_open.strip_prefix('\n') {
+        stripped
+    } else if let Some(stripped) = after_open.strip_prefix("\r\n") {
+        stripped
     } else {
         return None;
     };
@@ -193,17 +185,19 @@ fn split_frontmatter(content: &str) -> Option<(FrontmatterDelim, &str, &str)> {
     let closing = format!("\n{marker}\n");
     let closing_crlf = format!("\r\n{marker}\r\n");
 
-    if let Some(pos) = after_open.find(&closing) {
-        let fm = &after_open[..pos];
-        let body = &after_open[pos + closing.len()..];
-        Some((delim, fm, body))
-    } else if let Some(pos) = after_open.find(&closing_crlf) {
-        let fm = &after_open[..pos];
-        let body = &after_open[pos + closing_crlf.len()..];
-        Some((delim, fm, body))
-    } else {
-        None
-    }
+    after_open
+        .find(&closing)
+        .map(|pos| (pos, closing.len()))
+        .or_else(|| {
+            after_open
+                .find(&closing_crlf)
+                .map(|pos| (pos, closing_crlf.len()))
+        })
+        .map(|(pos, len)| {
+            let fm = &after_open[..pos];
+            let body = &after_open[pos + len..];
+            (delim, fm, body)
+        })
 }
 
 /// Update a version field inside frontmatter (YAML or TOML) of a markdown file.
@@ -281,11 +275,11 @@ fn update_frontmatter(path: &Utf8Path, dot_paths: &[&str], version: &str) -> Bum
             let mut any_modified = false;
             for dp in dot_paths {
                 let segments = parse_dot_path(dp);
-                if let Some(item) = apply_dot_path_toml(&mut doc, &segments) {
-                    if item.is_str() {
-                        *item = toml_edit::value(version);
-                        any_modified = true;
-                    }
+                if let Some(item) = apply_dot_path_toml(&mut doc, &segments)
+                    && item.is_str()
+                {
+                    *item = toml_edit::value(version);
+                    any_modified = true;
                 }
             }
 
@@ -325,11 +319,45 @@ fn apply_dot_path_toml<'a>(
                 current = current.get_mut(key.as_str())?;
             }
             DotSegment::Wildcard => {
+                warn!("wildcard dot-paths are not supported for TOML files");
                 return None;
             }
         }
     }
     Some(current)
+}
+
+fn update_toml(path: &Utf8Path, dot_paths: &[&str], version: &str) -> BumpResult<bool> {
+    let content = std::fs::read_to_string(path).map_err(|e| BumpError::ToolFailed {
+        tool: path.to_string(),
+        message: format!("failed to read: {e}"),
+    })?;
+
+    let mut doc: toml_edit::DocumentMut = content.parse().map_err(|e| BumpError::ToolFailed {
+        tool: path.to_string(),
+        message: format!("failed to parse TOML: {e}"),
+    })?;
+
+    let mut any_modified = false;
+    for dp in dot_paths {
+        let segments = parse_dot_path(dp);
+        if let Some(item) = apply_dot_path_toml(&mut doc, &segments)
+            && item.is_str()
+        {
+            *item = toml_edit::value(version);
+            any_modified = true;
+        }
+    }
+
+    if any_modified {
+        std::fs::write(path, doc.to_string()).map_err(|e| BumpError::ToolFailed {
+            tool: path.to_string(),
+            message: format!("failed to write: {e}"),
+        })?;
+        debug!(%version, %path, "updated TOML version file");
+    }
+
+    Ok(any_modified)
 }
 
 // ──────────────────────────────────────────────
@@ -406,13 +434,15 @@ fn resolve_paths(root: &Utf8Path, path_pattern: &str) -> BumpResult<(Vec<Utf8Pat
 }
 
 fn collect_dot_paths(config: &VersionFileConfig) -> Vec<&str> {
-    if let Some(ref f) = config.field {
-        vec![f.as_str()]
-    } else if let Some(ref fs) = config.fields {
-        fs.iter().map(|s| s.as_str()).collect()
-    } else {
-        vec![]
-    }
+    config.field.as_ref().map_or_else(
+        || {
+            config
+                .fields
+                .as_ref()
+                .map_or_else(Vec::new, |fs| fs.iter().map(|s| s.as_str()).collect())
+        },
+        |f| vec![f.as_str()],
+    )
 }
 
 /// Update version in all configured version files.
@@ -462,43 +492,6 @@ pub fn bump_version_files(
     }
 
     Ok(modified_files)
-}
-
-// ──────────────────────────────────────────────
-// TOML (format-preserving via toml_edit)
-// ──────────────────────────────────────────────
-
-fn update_toml(path: &Utf8Path, dot_paths: &[&str], version: &str) -> BumpResult<bool> {
-    let content = std::fs::read_to_string(path).map_err(|e| BumpError::ToolFailed {
-        tool: path.to_string(),
-        message: format!("failed to read: {e}"),
-    })?;
-
-    let mut doc: toml_edit::DocumentMut = content.parse().map_err(|e| BumpError::ToolFailed {
-        tool: path.to_string(),
-        message: format!("failed to parse TOML: {e}"),
-    })?;
-
-    let mut any_modified = false;
-    for dp in dot_paths {
-        let segments = parse_dot_path(dp);
-        if let Some(item) = apply_dot_path_toml(&mut doc, &segments) {
-            if item.is_str() {
-                *item = toml_edit::value(version);
-                any_modified = true;
-            }
-        }
-    }
-
-    if any_modified {
-        std::fs::write(path, doc.to_string()).map_err(|e| BumpError::ToolFailed {
-            tool: path.to_string(),
-            message: format!("failed to write: {e}"),
-        })?;
-        debug!(%version, %path, "updated TOML version file");
-    }
-
-    Ok(any_modified)
 }
 
 #[cfg(test)]
