@@ -2118,6 +2118,7 @@ mod tests {
             next: Version::new(1, 1, 0),
             strategy: VersionStrategy::Explicit("1.1.0".into()),
             detection: test_detection_rust(),
+            version_files: vec![],
         };
         let ready = ReadyShip {
             bump,
@@ -2141,6 +2142,7 @@ mod tests {
             next: Version::parse("99999.99999.99999").unwrap(),
             strategy: VersionStrategy::Explicit("99999.99999.99999".into()),
             detection: test_detection_rust(),
+            version_files: vec![],
         };
         let ready = ReadyShip {
             bump,
@@ -2162,6 +2164,7 @@ mod tests {
             next: Version::new(0, 1, 0),
             strategy: VersionStrategy::Explicit("0.1.0".into()),
             detection: test_detection_rust(),
+            version_files: vec![],
         };
         let ready = ReadyShip {
             bump,
@@ -2186,6 +2189,7 @@ mod tests {
             next: Version::new(0, 1, 0),
             strategy: VersionStrategy::Explicit("0.1.0".into()),
             detection: test_detection_rust(),
+            version_files: vec![],
         };
         let ready = ReadyShip {
             bump,
@@ -2215,6 +2219,7 @@ mod tests {
                 candidates: vec![],
             },
             detection: test_detection_rust(),
+            version_files: vec![],
         };
         let ship = InteractiveShip {
             bump,
@@ -2265,6 +2270,7 @@ mod tests {
                     candidates: vec![],
                 },
                 detection: test_detection_rust(),
+                version_files: vec![],
             },
             options: ShipOptions {
                 no_publish: true,
@@ -2291,6 +2297,7 @@ mod tests {
                     candidates: vec![],
                 },
                 detection: test_detection_generic(),
+                version_files: vec![],
             },
             options: ShipOptions::default(),
             config: Config::default(),
@@ -2322,6 +2329,7 @@ mod tests {
                     candidates: vec![],
                 },
                 detection: test_detection_rust(),
+                version_files: vec![],
             },
             options: ShipOptions::default(),
             config,

@@ -35,8 +35,9 @@
 
 use camino::{Utf8Path, Utf8PathBuf};
 use figment::Figment;
-use figment::providers::{Format, Json, Serialized, Toml, Yaml};
+use figment::providers::{Format, Json, Serialized, Toml};
 use serde::{Deserialize, Serialize};
+use serde_saphyr::figment::Yaml;
 
 use crate::ecosystem::{ChangelogTool, Ecosystem};
 use crate::error::{ConfigError, ConfigResult};
@@ -65,6 +66,8 @@ pub struct Config {
     pub hooks: Option<HooksConfig>,
     /// Ship command behavior.
     pub ship: Option<ShipConfig>,
+    /// Version files to update during bump (in addition to ecosystem files).
+    pub version_files: Option<Vec<VersionFileConfig>>,
 }
 
 /// Project-level configuration overrides.
@@ -226,6 +229,40 @@ pub struct ShipConfig {
     pub no_tag: Option<bool>,
     /// Skip entire git phase — commit, tag, push (equivalent to `--no-git`).
     pub no_git: Option<bool>,
+}
+
+/// Configuration for a version file to update during bump.
+///
+/// Each entry describes a file (or glob pattern) containing a version string
+/// that scrat should update when bumping the project version.
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
+pub struct VersionFileConfig {
+    /// File path relative to project root. Supports globs (`*`, `**`).
+    pub path: String,
+    /// File format — determines how the file is parsed and updated.
+    pub format: VersionFileFormat,
+    /// Dot-path to the version field (e.g., `"version"`, `"metadata.version"`).
+    /// Mutually exclusive with `fields`.
+    pub field: Option<String>,
+    /// Multiple dot-paths to update in one file.
+    /// Mutually exclusive with `field`.
+    pub fields: Option<Vec<String>>,
+}
+
+/// Supported file formats for version files.
+#[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum VersionFileFormat {
+    /// JSON file — parsed with serde_json, written with 2-space pretty-print.
+    Json,
+    /// TOML file — parsed with toml_edit for format-preserving updates.
+    Toml,
+    /// YAML file — parsed with serde-saphyr.
+    Yaml,
+    /// Markdown with YAML (`---`) or TOML (`+++`) frontmatter.
+    Frontmatter,
+    /// Plain text file — entire content is the version string.
+    Text,
 }
 
 /// Log level configuration.
@@ -1111,6 +1148,52 @@ no_git = true
         assert_eq!(ship.no_test, Some(true));
         assert_eq!(ship.no_tag, Some(true));
         assert_eq!(ship.no_git, Some(true));
+    }
+
+    #[test]
+    fn test_version_files_config_deserializes() {
+        let tmp = TempDir::new().unwrap();
+        let config_path = tmp.path().join("config.toml");
+        fs::write(
+            &config_path,
+            r#"
+[[version_files]]
+path = ".claude-plugin/plugin.json"
+format = "json"
+field = "version"
+
+[[version_files]]
+path = ".claude-plugin/marketplace.json"
+format = "json"
+fields = ["metadata.version", "plugins.*.version"]
+
+[[version_files]]
+path = "VERSION"
+format = "text"
+"#,
+        )
+        .unwrap();
+
+        let config_path = Utf8PathBuf::try_from(config_path).unwrap();
+        let (config, _) = ConfigLoader::new()
+            .with_user_config(false)
+            .with_file(&config_path)
+            .load()
+            .unwrap();
+
+        let vf = config.version_files.unwrap();
+        assert_eq!(vf.len(), 3);
+        assert_eq!(vf[0].path, ".claude-plugin/plugin.json");
+        assert!(matches!(vf[0].format, VersionFileFormat::Json));
+        assert_eq!(vf[0].field.as_deref(), Some("version"));
+        assert!(vf[0].fields.is_none());
+
+        assert_eq!(vf[1].fields.as_ref().unwrap().len(), 2);
+        assert!(vf[1].field.is_none());
+
+        assert!(matches!(vf[2].format, VersionFileFormat::Text));
+        assert!(vf[2].field.is_none());
+        assert!(vf[2].fields.is_none());
     }
 
     #[test]

@@ -52,7 +52,6 @@ inquire = "0.9"
 serde-saphyr = "0.0"
 camino = { version = "1.2", features = ["serde1"] }
 base64 = "0.22"
-directories = "6.0"
 
 [dev-dependencies]
 assert_cmd = "2.2"
