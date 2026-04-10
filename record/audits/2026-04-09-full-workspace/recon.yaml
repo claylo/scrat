@@ -1,0 +1,476 @@
+---
+meta:
+  project: scrat
+  commit: f706dc96b708f63fc3c47f9dd09ca30fd89438a8
+  timestamp: 2026-04-09T21:30:00-04:00
+  scope: "Full workspace audit — crates/scrat (CLI) and crates/scrat-core (library)"
+
+structure:
+  root: /Users/clay/source/claylo/scrat
+  total_files: 35
+  total_lines: 17895
+  languages:
+    - language: Rust
+      files: 35
+      lines: 17895
+      percentage: 100.0
+
+  modules:
+    # --- scrat-core modules ---
+    - name: ship
+      path: crates/scrat-core/src/ship.rs
+      files: 1
+      lines: 3324
+      entry_points:
+        - name: plan_ship
+          path: crates/scrat-core/src/ship.rs
+          line: 1
+          kind: public_fn
+      dependencies:
+        - target: bump
+          weight: 1
+        - target: config
+          weight: 1
+        - target: deps
+          weight: 1
+        - target: ecosystem
+          weight: 1
+        - target: git
+          weight: 1
+        - target: hooks
+          weight: 1
+        - target: notes
+          weight: 1
+        - target: pipeline
+          weight: 1
+        - target: preflight
+          weight: 1
+        - target: stats
+          weight: 1
+
+    - name: preflight
+      path: crates/scrat-core/src/preflight.rs
+      files: 1
+      lines: 1620
+      entry_points:
+        - name: run_preflight
+          path: crates/scrat-core/src/preflight.rs
+          line: 1
+          kind: public_fn
+      dependencies:
+        - target: config
+          weight: 1
+        - target: detect
+          weight: 1
+        - target: ecosystem
+          weight: 1
+        - target: git
+          weight: 1
+        - target: ship
+          weight: 1
+
+    - name: notes
+      path: crates/scrat-core/src/notes.rs
+      files: 1
+      lines: 1573
+      entry_points:
+        - name: preview_notes
+          path: crates/scrat-core/src/notes.rs
+          line: 1
+          kind: public_fn
+      dependencies:
+        - target: config
+          weight: 1
+        - target: pipeline
+          weight: 1
+        - target: deps
+          weight: 1
+        - target: detect
+          weight: 1
+        - target: git
+          weight: 1
+        - target: stats
+          weight: 1
+        - target: version
+          weight: 1
+
+    - name: config
+      path: crates/scrat-core/src/config.rs
+      files: 1
+      lines: 1221
+      entry_points:
+        - name: Config
+          path: crates/scrat-core/src/config.rs
+          line: 1
+          kind: public_fn
+        - name: ConfigLoader
+          path: crates/scrat-core/src/config.rs
+          line: 1
+          kind: public_fn
+      dependencies:
+        - target: ecosystem
+          weight: 1
+        - target: error
+          weight: 1
+
+    - name: deps
+      path: crates/scrat-core/src/deps.rs
+      files: 1
+      lines: 1053
+      entry_points:
+        - name: collect_dep_changes
+          path: crates/scrat-core/src/deps.rs
+          line: 1
+          kind: public_fn
+      dependencies:
+        - target: ecosystem
+          weight: 1
+        - target: git
+          weight: 1
+        - target: pipeline
+          weight: 1
+
+    - name: bump
+      path: crates/scrat-core/src/bump.rs
+      files: 1
+      lines: 980
+      entry_points:
+        - name: plan_bump
+          path: crates/scrat-core/src/bump.rs
+          line: 1
+          kind: public_fn
+      dependencies:
+        - target: config
+          weight: 1
+        - target: ecosystem
+          weight: 1
+        - target: version
+          weight: 1
+
+    - name: version_files
+      path: crates/scrat-core/src/version_files.rs
+      files: 1
+      lines: 857
+      entry_points:
+        - name: bump_version_files
+          path: crates/scrat-core/src/version_files.rs
+          line: 1
+          kind: public_fn
+      dependencies:
+        - target: bump
+          weight: 1
+        - target: config
+          weight: 1
+
+    - name: hooks
+      path: crates/scrat-core/src/hooks.rs
+      files: 1
+      lines: 708
+      entry_points:
+        - name: run_hooks
+          path: crates/scrat-core/src/hooks.rs
+          line: 1
+          kind: public_fn
+      dependencies: []
+
+    - name: git
+      path: crates/scrat-core/src/git.rs
+      files: 1
+      lines: 562
+      entry_points:
+        - name: git_commit
+          path: crates/scrat-core/src/git.rs
+          line: 1
+          kind: public_fn
+        - name: git_tag
+          path: crates/scrat-core/src/git.rs
+          line: 1
+          kind: public_fn
+      dependencies: []
+
+    - name: observability
+      path: crates/scrat-core/src/observability.rs
+      files: 1
+      lines: 552
+      entry_points:
+        - name: init_tracing
+          path: crates/scrat-core/src/observability.rs
+          line: 1
+          kind: public_fn
+      dependencies: []
+
+    - name: init
+      path: crates/scrat-core/src/init.rs
+      files: 1
+      lines: 501
+      entry_points:
+        - name: scaffold_config
+          path: crates/scrat-core/src/init.rs
+          line: 1
+          kind: public_fn
+      dependencies:
+        - target: config
+          weight: 1
+        - target: detect
+          weight: 1
+        - target: ecosystem
+          weight: 1
+        - target: git
+          weight: 1
+
+    - name: pipeline
+      path: crates/scrat-core/src/pipeline.rs
+      files: 1
+      lines: 462
+      entry_points:
+        - name: PipelineContext
+          path: crates/scrat-core/src/pipeline.rs
+          line: 1
+          kind: public_fn
+      dependencies:
+        - target: hooks
+          weight: 1
+
+    - name: detect
+      path: crates/scrat-core/src/detect/
+      files: 2
+      lines: 537
+      entry_points:
+        - name: detect_project
+          path: crates/scrat-core/src/detect/mod.rs
+          line: 1
+          kind: public_fn
+      dependencies:
+        - target: ecosystem
+          weight: 1
+
+    - name: ecosystem
+      path: crates/scrat-core/src/ecosystem.rs
+      files: 1
+      lines: 299
+      entry_points:
+        - name: Ecosystem
+          path: crates/scrat-core/src/ecosystem.rs
+          line: 1
+          kind: public_fn
+      dependencies: []
+
+    - name: version
+      path: crates/scrat-core/src/version/
+      files: 4
+      lines: 549
+      entry_points:
+        - name: current_version_from_tags
+          path: crates/scrat-core/src/version/mod.rs
+          line: 1
+          kind: public_fn
+        - name: conventional::compute_next_version
+          path: crates/scrat-core/src/version/conventional.rs
+          line: 1
+          kind: public_fn
+      dependencies:
+        - target: ecosystem
+          weight: 1
+
+    - name: stats
+      path: crates/scrat-core/src/stats.rs
+      files: 1
+      lines: 90
+      entry_points:
+        - name: collect_stats
+          path: crates/scrat-core/src/stats.rs
+          line: 1
+          kind: public_fn
+      dependencies:
+        - target: git
+          weight: 1
+        - target: pipeline
+          weight: 1
+
+    - name: error
+      path: crates/scrat-core/src/error.rs
+      files: 1
+      lines: 18
+      entry_points:
+        - name: ConfigError
+          path: crates/scrat-core/src/error.rs
+          line: 1
+          kind: public_fn
+      dependencies: []
+
+    # --- scrat CLI modules ---
+    - name: cli-commands
+      path: crates/scrat/src/commands/
+      files: 8
+      lines: 1438
+      entry_points:
+        - name: main
+          path: crates/scrat/src/main.rs
+          line: 1
+          kind: main
+      dependencies:
+        - target: scrat-core
+          weight: 18
+
+    - name: terminal
+      path: crates/scrat/src/terminal.rs
+      files: 1
+      lines: 107
+      entry_points:
+        - name: render_shipit
+          path: crates/scrat/src/terminal.rs
+          line: 1
+          kind: public_fn
+      dependencies: []
+
+dependencies:
+  manifest: crates/scrat-core/Cargo.toml
+  items:
+    # scrat-core deps
+    - name: anyhow
+      version: "1.0"
+      kind: direct
+    - name: camino
+      version: "1.2"
+      kind: direct
+    - name: clap
+      version: "4.6"
+      kind: direct
+    - name: directories
+      version: "6.0"
+      kind: direct
+    - name: figment
+      version: "0.10"
+      kind: direct
+    - name: serde-saphyr
+      version: "0.0"
+      kind: direct
+    - name: semver
+      version: "1.0"
+      kind: direct
+    - name: serde
+      version: "1.0"
+      kind: direct
+    - name: serde_json
+      version: "1.0"
+      kind: direct
+    - name: tempfile
+      version: "3.27"
+      kind: direct
+    - name: thiserror
+      version: "2.0"
+      kind: direct
+    - name: tracing
+      version: "0.1"
+      kind: direct
+    - name: tracing-appender
+      version: "0.2"
+      kind: direct
+    - name: tracing-subscriber
+      version: "0.3"
+      kind: direct
+    - name: which
+      version: "7"
+      kind: direct
+    - name: glob
+      version: "0.3"
+      kind: direct
+    - name: toml_edit
+      version: "0.22"
+      kind: direct
+    # scrat CLI deps
+    - name: clap
+      version: "4.6"
+      kind: direct
+      notes: "CLI crate"
+    - name: owo-colors
+      version: "4.3"
+      kind: direct
+      notes: "CLI crate"
+    - name: indicatif
+      version: "0.18"
+      kind: direct
+      notes: "CLI crate"
+    - name: inquire
+      version: "0.9"
+      kind: direct
+      notes: "CLI crate"
+    - name: base64
+      version: "0.22"
+      kind: direct
+      notes: "CLI crate - terminal image rendering"
+
+churn:
+  period: "last 2 months (project age: ~2 months, started 2026-02-09)"
+  hotspots:
+    - path: crates/scrat-core/src/ship.rs
+      commits: 15
+      authors: 1
+      last_touched: 2026-04-09
+      monthly_commits: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 8, 7]
+    - path: crates/scrat-core/src/config.rs
+      commits: 13
+      authors: 1
+      last_touched: 2026-04-09
+      monthly_commits: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 7, 6]
+    - path: crates/scrat-core/src/lib.rs
+      commits: 12
+      authors: 1
+      last_touched: 2026-04-09
+      monthly_commits: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 6, 6]
+    - path: crates/scrat/src/main.rs
+      commits: 10
+      authors: 1
+      last_touched: 2026-04-03
+      monthly_commits: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 6, 4]
+    - path: crates/scrat/src/commands/ship.rs
+      commits: 10
+      authors: 1
+      last_touched: 2026-04-04
+      monthly_commits: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 5, 5]
+    - path: crates/scrat-core/src/preflight.rs
+      commits: 9
+      authors: 1
+      last_touched: 2026-04-04
+      monthly_commits: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 5, 4]
+    - path: crates/scrat-core/src/notes.rs
+      commits: 9
+      authors: 1
+      last_touched: 2026-04-05
+      monthly_commits: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 5, 4]
+    - path: crates/scrat-core/src/bump.rs
+      commits: 7
+      authors: 1
+      last_touched: 2026-04-09
+      monthly_commits: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 4, 3]
+
+  recent_activity:
+    total_commits: 20
+    active_authors: 1
+    files_changed: 32
+
+boundaries:
+  - name: shell_execution
+    description: "Modules that spawn external processes (git, git-cliff, gh, cargo, ecosystem CLIs)"
+    modules: [git, hooks, bump, notes, preflight, ship, deps, stats, version]
+    notes: "Primary attack surface — command injection via interpolated values"
+
+  - name: config_deserialization
+    description: "Figment-based config loading from YAML/TOML files"
+    modules: [config]
+    notes: "Untrusted config files parsed via figment + serde-saphyr"
+
+  - name: file_system_writes
+    description: "Modules that write to the filesystem (version bumps, config init, version-files)"
+    modules: [bump, init, version_files]
+    notes: "Path traversal risk if version file paths are user-controlled"
+
+  - name: git_diff_parsing
+    description: "Parsing git diff output for lockfile changes and stats"
+    modules: [deps, stats]
+    notes: "Untrusted diff content from git output"
+
+  - name: json_context_injection
+    description: "Building JSON context for git-cliff template rendering"
+    modules: [notes, pipeline]
+    notes: "Data injected into template engine via --from-context"

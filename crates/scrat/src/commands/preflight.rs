@@ -6,17 +6,21 @@ use tracing::{debug, instrument};
 
 use scrat_core::config::{Config, ProjectConfig};
 use scrat_core::preflight;
+use scrat_core::ship::ShipOptions;
 
 /// Arguments for the `preflight` subcommand.
 #[derive(Args, Debug, Default)]
 pub struct PreflightArgs {
-    // Uses global --json flag for structured output
+    /// Skip `git fetch` (faster startup, may miss recent remote changes)
+    #[arg(long)]
+    pub no_fetch: bool,
+    // Other output options inherit from the global --json flag.
 }
 
 /// Run preflight checks and display results.
 #[instrument(name = "cmd_preflight", skip_all, fields(json_output))]
 pub fn cmd_preflight(
-    _args: PreflightArgs,
+    args: PreflightArgs,
     global_json: bool,
     config: &Config,
     cwd: &camino::Utf8Path,
@@ -24,8 +28,14 @@ pub fn cmd_preflight(
     debug!(json_output = global_json, "executing preflight command");
 
     let mut config = config.clone();
-    // Standalone preflight: None means check everything (no phases skipped)
-    let mut report = preflight::run_preflight(cwd, &config, None);
+    let opts = ShipOptions {
+        no_fetch: args.no_fetch,
+        ..ShipOptions::default()
+    };
+    // Standalone preflight passes a ShipOptions skeleton purely to honor
+    // the network-side flags (--no-fetch). Phase-skip flags stay false so
+    // every credential check still runs.
+    let mut report = preflight::run_preflight(cwd, &config, Some(&opts));
 
     // If no ecosystem detected and not in JSON mode, prompt the user
     if report.detection.is_none() && !global_json {
@@ -34,7 +44,7 @@ pub fn cmd_preflight(
                 // Re-run preflight with the user's ecosystem choice
                 let project = config.project.get_or_insert_with(ProjectConfig::default);
                 project.project_type = Some(ecosystem);
-                report = preflight::run_preflight(cwd, &config, None);
+                report = preflight::run_preflight(cwd, &config, Some(&opts));
             }
             Err(_) => {
                 // User cancelled — show the original report

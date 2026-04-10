@@ -104,6 +104,9 @@ pub struct ShipOptions {
     pub no_tag: bool,
     /// Skip entire git phase (commit, tag, push).
     pub no_git: bool,
+    /// Skip `git fetch` before comparing local and remote during preflight.
+    /// Trades freshness of the remote-sync check for startup latency.
+    pub no_fetch: bool,
     /// Override draft mode from CLI (`Some(true)` = `--draft`, `Some(false)` = `--no-draft`).
     pub draft_override: Option<bool>,
 }
@@ -273,8 +276,19 @@ pub fn plan_ship(
     config: &Config,
     options: ShipOptions,
 ) -> ShipResult<ShipPlan> {
+    // Detection is pure `(project_root, config)` and cannot change during
+    // planning — compute it once and thread it through both preflight and
+    // bump planning. This avoids re-scanning marker files and re-probing
+    // PATH twice per ship invocation.
+    let detection = crate::detect::resolve_detection(project_root, config);
+
     // Phase 1: Preflight
-    let report = preflight::run_preflight(project_root, config, Some(&options));
+    let report = preflight::run_preflight_with_detection(
+        project_root,
+        config,
+        Some(&options),
+        detection.clone(),
+    );
 
     if !report.all_passed {
         let failures: Vec<&str> = report
@@ -286,13 +300,27 @@ pub fn plan_ship(
         return Err(ShipError::PreflightFailed(failures.join("; ")));
     }
 
-    // Phase 2: Version resolution (delegates to bump::plan_bump)
-    let bump_plan = match bump::plan_bump(project_root, config, options.explicit_version.as_deref())
-    {
+    // Phase 2: Version resolution
+    let Some(detection) = detection else {
+        // Ecosystem not detected — signal the CLI to prompt for selection
+        debug!("ecosystem detection failed, requesting user selection");
+        return Ok(ShipPlan::NeedsEcosystemSelection(NeedsEcosystemSelection {
+            options,
+            config: config.clone(),
+            project_root: project_root.to_owned(),
+        }));
+    };
+
+    let bump_plan = match bump::plan_bump_with_detection(
+        project_root,
+        config,
+        options.explicit_version.as_deref(),
+        detection,
+    ) {
         Ok(plan) => plan,
         Err(bump::BumpError::Detection(_)) => {
-            // Ecosystem not detected — signal the CLI to prompt for selection
-            debug!("ecosystem detection failed, requesting user selection");
+            // Shouldn't happen since we pre-checked detection, but stay defensive
+            debug!("bump detection failed after preflight succeeded, requesting user selection");
             return Ok(ShipPlan::NeedsEcosystemSelection(NeedsEcosystemSelection {
                 options,
                 config: config.clone(),
@@ -655,6 +683,7 @@ impl ReadyShip {
                 project_root,
                 &tag,
                 version,
+                ctx.branch.as_deref(),
                 self.options.no_push,
                 self.options.no_tag,
             )?;
@@ -912,12 +941,21 @@ fn run_phase_hooks(
     });
 
     if !dry_run {
-        let pipeline_json =
-            serde_json::to_string(pipeline_ctx).map_err(|e| ShipError::PhaseFailed {
-                phase,
-                message: format!("failed to serialize pipeline context: {e}"),
-            })?;
-        let output = hooks::run_hooks(cmds, context, project_root, Some(&pipeline_json))?;
+        // Only serialize the pipeline context if there's at least one
+        // `filter:` hook that will consume it — otherwise we'd be paying
+        // the serialize-and-drop cost at every phase boundary for no benefit.
+        let has_filter = cmds.iter().any(|c| c.trim_start().starts_with("filter:"));
+        let pipeline_json = if has_filter {
+            Some(
+                serde_json::to_string(pipeline_ctx).map_err(|e| ShipError::PhaseFailed {
+                    phase,
+                    message: format!("failed to serialize pipeline context: {e}"),
+                })?,
+            )
+        } else {
+            None
+        };
+        let output = hooks::run_hooks(cmds, context, project_root, pipeline_json.as_deref())?;
 
         if let Some(filter_json) = output.filter_output {
             *pipeline_ctx =
@@ -1027,6 +1065,7 @@ fn run_git_phase(
     _project_root: &Utf8Path,
     tag: &str,
     version: &Version,
+    branch_hint: Option<&str>,
     no_push: bool,
     no_tag: bool,
 ) -> ShipResult<GitPhaseResult> {
@@ -1042,11 +1081,11 @@ fn run_git_phase(
 
     // Push if requested (only push tags if we created one)
     if !no_push {
-        let branch = git::current_branch()?.unwrap_or_else(|| "HEAD".into());
-        git::push("origin", &branch, !no_tag)?;
+        let branch = branch_hint.unwrap_or("HEAD");
+        git::push("origin", branch, !no_tag)?;
         Ok(GitPhaseResult {
             hash,
-            branch: Some(branch),
+            branch: Some(branch.to_string()),
             pushed: true,
         })
     } else {

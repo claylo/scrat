@@ -36,7 +36,7 @@ use std::time::{Duration, Instant};
 
 use camino::Utf8Path;
 use thiserror::Error;
-use tracing::{debug, instrument};
+use tracing::{debug, instrument, warn};
 
 /// Errors from hook execution.
 #[derive(Error, Debug)]
@@ -342,6 +342,21 @@ fn run_single(cmd: &str, context: &HookContext, project_root: &Utf8Path) -> Hook
     Ok(result)
 }
 
+/// Truncate a string to roughly `max_bytes` at a valid UTF-8 char boundary,
+/// appending `"..."` if truncation occurred.
+///
+/// Used for building diagnostic messages from untrusted external output —
+/// raw `&s[..max_bytes]` panics if a multi-byte codepoint straddles the
+/// target index. `str::floor_char_boundary` (stable since 1.91.0) snaps
+/// down to the nearest valid boundary at or below the requested index.
+fn truncate_at_char_boundary(s: &str, max_bytes: usize) -> String {
+    if s.len() <= max_bytes {
+        return s.to_string();
+    }
+    let boundary = s.floor_char_boundary(max_bytes);
+    format!("{}...", &s[..boundary])
+}
+
 /// Run a single filter command: pipe JSON to stdin, capture stdout.
 ///
 /// The command runs through `sh -c` with stdin/stdout/stderr piped.
@@ -364,10 +379,15 @@ fn run_filter_single(
         .stderr(Stdio::piped())
         .spawn()?;
 
-    // Write JSON to stdin, then drop to close the pipe
-    if let Some(mut stdin) = child.stdin.take() {
-        // Ignore write errors — the child may have exited early
-        let _ = stdin.write_all(json_stdin.as_bytes());
+    // Write JSON to stdin, then drop to close the pipe.
+    // A write error usually means the child exited before reading, which
+    // the exit-status check below will surface. We still log the failure so
+    // a partially-written buffer that somehow produces valid-looking JSON
+    // leaves a diagnostic trail.
+    if let Some(mut stdin) = child.stdin.take()
+        && let Err(e) = stdin.write_all(json_stdin.as_bytes())
+    {
+        warn!(error = %e, command = %cmd, "filter hook stdin write failed");
     }
 
     let output = child.wait_with_output()?;
@@ -390,11 +410,7 @@ fn run_filter_single(
     if serde_json::from_str::<serde_json::Value>(trimmed).is_err() {
         return Err(HookError::FilterOutputInvalid {
             command: cmd.to_string(),
-            detail: if trimmed.len() > 200 {
-                format!("{}...", &trimmed[..200])
-            } else {
-                trimmed.to_string()
-            },
+            detail: truncate_at_char_boundary(trimmed, 200),
         });
     }
 
@@ -704,5 +720,47 @@ mod tests {
         let json: serde_json::Value =
             serde_json::from_str(output.filter_output.as_ref().unwrap()).unwrap();
         assert_eq!(json["injected"], "yes");
+    }
+
+    #[test]
+    fn truncate_at_char_boundary_ascii_short() {
+        assert_eq!(truncate_at_char_boundary("hello", 200), "hello");
+    }
+
+    #[test]
+    fn truncate_at_char_boundary_ascii_exact() {
+        let s = "a".repeat(200);
+        assert_eq!(truncate_at_char_boundary(&s, 200), s);
+    }
+
+    #[test]
+    fn truncate_at_char_boundary_ascii_long() {
+        let s = "a".repeat(250);
+        let truncated = truncate_at_char_boundary(&s, 200);
+        assert_eq!(truncated.len(), 200 + 3); // 200 bytes + "..."
+        assert!(truncated.ends_with("..."));
+    }
+
+    #[test]
+    fn truncate_at_char_boundary_multibyte_straddles_limit() {
+        // 199 ASCII bytes + 3-byte snowman (☃, U+2603) + tail.
+        // Byte 200 falls inside the snowman — raw slicing would panic.
+        let mut s = "a".repeat(199);
+        s.push('☃');
+        s.push_str(" snowman tail padding padding padding");
+        let truncated = truncate_at_char_boundary(&s, 200);
+        // Should snap down to byte 199 (before the snowman)
+        assert!(truncated.ends_with("..."));
+        assert!(truncated.is_char_boundary(truncated.len() - 3));
+    }
+
+    #[test]
+    fn truncate_at_char_boundary_multibyte_immediately_after_limit() {
+        // 200 ASCII bytes + 4-byte emoji. Byte 200 IS a valid boundary.
+        let mut s = "a".repeat(200);
+        s.push('🦀'); // 4 bytes
+        let truncated = truncate_at_char_boundary(&s, 200);
+        assert_eq!(truncated.len(), 200 + 3);
+        assert!(truncated.ends_with("..."));
     }
 }

@@ -53,7 +53,10 @@ fn compute_via_cliff(
         tmp_file
             .path()
             .to_str()
-            .expect("temp path is UTF-8")
+            .ok_or_else(|| VersionError::ToolFailed {
+                tool: "git-cliff".into(),
+                message: format!("temp config path is not valid UTF-8: {:?}", tmp_file.path()),
+            })?
             .to_string()
     };
 

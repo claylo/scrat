@@ -1,0 +1,878 @@
+---
+audit_date: 2026-04-09
+scope: "Full workspace audit — crates/scrat (CLI) and crates/scrat-core (library)"
+commit: f706dc96b708f63fc3c47f9dd09ca30fd89438a8
+assessment: |
+  scrat is a young Rust release-management CLI (2 months old, ~18k LOC) with a
+  disciplined architecture: thin CLI over fat core, typed error hierarchy via
+  thiserror, zero unwrap() in production library code, and a clean dependency tree
+  (no CVEs, no unused deps, no async runtime for a synchronous tool). The shell
+  execution boundary — where scrat spawns git, git-cliff, gh, and user-defined hooks
+  — is the primary risk surface. One panic is reachable from external input in the
+  hook filter path, and two silent error discards at system boundaries could mask
+  failures. The ecosystem support matrix documents 7 ecosystems but Node bump fails
+  hard and several detectors are stubs. The type design is sound but has polish gaps
+  (missing derives, a library depending on clap). Overall posture: solid foundation
+  with a short remediation list.
+
+narratives:
+  - slug: shell-execution-boundary
+    title: "The Shell Execution Boundary"
+    thesis: "The interface between scrat and external processes handles the happy path well but has gaps in error reporting and one panic reachable from untrusted output."
+    verdict: "The hooks system is architecturally sound — parallel batches, sync barriers, filter pipes — but the error handling at the boundary treats all failures as non-critical. The truncation panic is the most urgent fix; the silent discards are defense-in-depth gaps that degrade diagnostic quality without causing incorrect behavior."
+
+    flow:
+      - id: user-config
+        label: "User configures hook"
+        type: start
+      - id: interpolate
+        label: "Interpolate variables"
+        type: process
+      - id: spawn
+        label: "Spawn shell command"
+        type: process
+      - id: is-filter
+        label: "filter: prefix?"
+        type: decision
+        no: capture-result
+      - id: write-stdin
+        label: "Write JSON to stdin"
+        type: process
+        findings:
+          - slug: hooks-stdin-write-silently-discarded
+            label: "Silent write fail"
+      - id: read-stdout
+        label: "Read stdout"
+        type: process
+      - id: validate-json
+        label: "Valid JSON?"
+        type: decision
+        no: truncate-error
+      - id: merge-context
+        label: "Merge into pipeline"
+        type: end
+      - id: truncate-error
+        label: "Build error message"
+        type: process
+        spine: false
+        findings:
+          - slug: hooks-filter-truncate-panic
+            label: "Byte-index panic"
+      - id: capture-result
+        label: "Capture exit code"
+        type: process
+        spine: false
+        next: merge-context
+
+    findings:
+      - slug: hooks-filter-truncate-panic
+        title: "Byte-index truncation of filter output panics on multi-byte UTF-8"
+        concern: significant
+        locations:
+          - path: crates/scrat-core/src/hooks.rs
+            start_line: 393
+            end_line: 394
+        evidence: |
+          detail: if trimmed.len() > 200 {
+              format!("{}...", &trimmed[..200])
+        evidence_markers:
+          - lines: "2"
+            type: del
+            label: "&trimmed[..200] indexes by byte, not char"
+        mechanism: |
+          When a filter: hook command returns invalid JSON, scrat builds an error message
+          that includes the first 200 characters of the output. The truncation uses byte
+          indexing (&trimmed[..200]) on a string whose content is entirely external — it is
+          stdout from a user-defined shell command. If a multi-byte UTF-8 character straddles
+          byte offset 200, str indexing panics with "byte index 200 is not a char boundary".
+          Any non-ASCII character in the first 200 bytes of invalid filter output triggers this.
+        remediation: |
+          Replace &trimmed[..200] with a char-boundary-safe truncation. The simplest approach:
+          let boundary = trimmed.floor_char_boundary(200);
+          format!("{}...", &trimmed[..boundary])
+          floor_char_boundary is stable since Rust 1.82.0 (MSRV 1.89.0 qualifies).
+        temporal:
+          introduced: 2026-02-10
+          last_modified: 2026-02-10
+          commit_count: 3
+          monthly_commits: [0,0,0,0,0,0,0,0,0,0,3,0]
+        chains:
+          enables: []
+          enabled_by: []
+          related: [hooks-stdin-write-silently-discarded]
+        effort: trivial
+        effort_notes: "One-line change, floor_char_boundary is in MSRV"
+
+      - slug: hooks-stdin-write-silently-discarded
+        title: "stdin write error silently discarded in filter hook"
+        concern: moderate
+        locations:
+          - path: crates/scrat-core/src/hooks.rs
+            start_line: 368
+            end_line: 371
+        evidence: |
+          if let Some(mut stdin) = child.stdin.take() {
+              // Ignore write errors — the child may have exited early
+              let _ = stdin.write_all(json_stdin.as_bytes());
+          }
+        evidence_markers:
+          - lines: "3"
+            type: del
+            label: "write result discarded for all error types"
+        mechanism: |
+          A filter: hook receives the full PipelineContext as JSON on stdin. If the write
+          fails partway through (EPIPE on a large context, child exiting mid-read), the
+          child receives truncated JSON. The child may then produce garbage output that
+          happens to be valid JSON, which scrat would merge back into the pipeline context.
+          The comment documents the "child exited early" case but the discard also swallows
+          partial-write errors where the child is still running.
+        remediation: |
+          Log a warning on write failure and check the child's exit status afterward. If
+          the child is still running after a write error, treat it as a hook failure rather
+          than proceeding with potentially corrupt output.
+        temporal:
+          introduced: 2026-02-10
+          last_modified: 2026-02-10
+          commit_count: 3
+          monthly_commits: [0,0,0,0,0,0,0,0,0,0,3,0]
+        chains:
+          enables: []
+          enabled_by: []
+          related: [hooks-filter-truncate-panic]
+        effort: small
+        effort_notes: "Need to restructure the write/wait sequence slightly"
+
+      - slug: git-fetch-silently-discarded
+        title: "git fetch failure silently discarded in remote sync check"
+        concern: moderate
+        locations:
+          - path: crates/scrat-core/src/git.rs
+            start_line: 94
+            end_line: 95
+        evidence: |
+          // Fetch to get latest remote state (non-fatal if it fails)
+          let _ = git(&["fetch", "--quiet"]);
+        evidence_markers:
+          - lines: "2"
+            type: del
+            label: "fetch result discarded without logging"
+        mechanism: |
+          is_remote_in_sync() calls git fetch to update remote refs before comparing
+          local vs remote HEAD. If the fetch fails (network outage, SSH key issue),
+          the function compares against potentially stale refs and may report "in sync"
+          incorrectly. The comment documents the intent (non-fatal) but no diagnostic
+          is emitted, making it invisible when the preflight safety net degrades.
+        remediation: |
+          Log at debug level when fetch fails so the user can diagnose stale-ref issues:
+          if let Err(e) = git(&["fetch", "--quiet"]) {
+              debug!(%e, "fetch failed, comparing with cached remote state");
+          }
+        temporal:
+          introduced: 2026-02-09
+          last_modified: 2026-04-04
+          commit_count: 4
+          monthly_commits: [0,0,0,0,0,0,0,0,0,0,3,1]
+        chains:
+          enables: []
+          enabled_by: []
+          related: []
+        effort: trivial
+        effort_notes: "Add one debug!() line"
+
+  - slug: ecosystem-completeness
+    title: "The Ecosystem Completeness Surface"
+    thesis: "scrat documents 7 ecosystems but delivers full capability only for Rust; Node bump fails hard, and the remaining ecosystem detectors are stubs without tool probing."
+    verdict: "Rust is production-ready. PHP and Python bump works when the version field exists. Go and Swift correctly skip version files (tags are the version). Node is broken — the bump returns a hard error despite the detector populating a bump_cmd. Ruby silently skips with a debug-only message. The detection stubs are a known gap with preflight as a safety net, but the changelog_tool field not being wired through is a real bug that causes silent changelog skips."
+
+    flow:
+      - id: detect
+        label: "Detect ecosystem"
+        type: start
+        findings:
+          - slug: detect-stubs-no-tool-probing
+            label: "No tool probing"
+      - id: probe-tools
+        label: "Probe tools on PATH"
+        type: process
+      - id: bump-match
+        label: "Which ecosystem?"
+        type: decision
+      - id: bump-rust
+        label: "Bump Cargo.toml"
+        type: process
+      - id: bump-node
+        label: "Bump package.json"
+        type: process
+        findings:
+          - slug: node-bump-hard-error
+            label: "Returns error"
+      - id: complete
+        label: "Continue pipeline"
+        type: end
+
+    findings:
+      - slug: node-bump-hard-error
+        title: "Node ecosystem bump returns hard error, blocking scrat ship"
+        concern: significant
+        locations:
+          - path: crates/scrat-core/src/bump.rs
+            start_line: 262
+            end_line: 264
+        evidence: |
+          Ecosystem::Node => {
+              return Err(BumpError::UnsupportedEcosystem(Ecosystem::Node));
+          }
+        evidence_markers:
+          - lines: "2"
+            type: del
+            label: "Hard error for the second-most-common ecosystem"
+        mechanism: |
+          When a user runs scrat ship on a Node project, the bump phase immediately
+          returns BumpError::UnsupportedEcosystem, aborting the entire pipeline. The
+          detection stub at detect/mod.rs:122 populates bump_cmd with
+          "npm version --no-git-tag-version", but that command is never called. The
+          README documents Node as a supported ecosystem for version bumping. This is
+          the most impactful completeness gap because Node is the second most common
+          ecosystem after Rust.
+        remediation: |
+          Implement Node version bumping similar to PHP/Python: read package.json, check
+          for a "version" field, update it with serde_json, write back. Alternatively,
+          shell out to the already-detected npm version --no-git-tag-version command.
+        temporal:
+          introduced: 2026-02-09
+          last_modified: 2026-04-09
+          commit_count: 7
+          monthly_commits: [0,0,0,0,0,0,0,0,0,0,4,3]
+        chains:
+          enables: [node-deps-parser-stub]
+          enabled_by: []
+          related: [ruby-bump-silently-skipped]
+        effort: small
+        effort_notes: "Package.json version update is straightforward serde_json"
+
+      - slug: node-deps-parser-stub
+        title: "Node dependency diff parser is a no-op stub"
+        concern: advisory
+        locations:
+          - path: crates/scrat-core/src/deps.rs
+            start_line: 165
+            end_line: 170
+        evidence: |
+          /// Parse a unified diff of `package-lock.json` into dependency changes.
+          ///
+          /// Stub — returns empty for now. Full implementation deferred.
+          const fn parse_package_lock_diff(_diff: &str) -> Vec<DepChange> {
+              Vec::new()
+          }
+        evidence_markers:
+          - lines: "4-5"
+            type: mark
+            label: "const fn ignoring input, returns empty"
+        mechanism: |
+          A Node user running scrat ship sees no dependency changes in their release
+          notes even when package-lock.json has changed. The stub is documented in a
+          doc comment but no user-visible warning is emitted. The pipeline proceeds
+          silently with incomplete release notes.
+        remediation: |
+          At minimum, add a warn!() log so users know deps are not being parsed.
+          Implementing the parser requires a JSON state machine for
+          package-lock.json's "packages" object.
+        temporal:
+          introduced: 2026-02-10
+          last_modified: 2026-03-27
+          commit_count: 4
+          monthly_commits: [0,0,0,0,0,0,0,0,0,0,3,1]
+        chains:
+          enables: []
+          enabled_by: [node-bump-hard-error]
+          related: []
+        effort: medium
+        effort_notes: "JSON state machine parser needed for full implementation"
+
+      - slug: ruby-bump-silently-skipped
+        title: "Ruby version bump silently skipped with debug-only message"
+        concern: advisory
+        locations:
+          - path: crates/scrat-core/src/bump.rs
+            start_line: 282
+            end_line: 284
+        evidence: |
+          Ecosystem::Ruby => {
+              debug!("ruby version bump not yet supported — version lives in gemspec/version.rb");
+          }
+        evidence_markers:
+          - lines: "2"
+            type: mark
+            label: "debug-level only — invisible without -vv"
+        mechanism: |
+          Unlike Node (which fails hard), Ruby silently proceeds without bumping any
+          version file. A Ruby project release could end up with the git tag saying
+          v2.0.0 while the gemspec still says 1.9.0. The version_files config provides
+          a workaround (declare version.rb explicitly) but this is not documented or
+          suggested.
+        remediation: |
+          Log at info level so users see the skip without debug verbosity. Document in
+          README that Ruby users should use version_files config to declare their
+          version.rb path.
+        temporal:
+          introduced: 2026-02-09
+          last_modified: 2026-04-09
+          commit_count: 7
+          monthly_commits: [0,0,0,0,0,0,0,0,0,0,4,3]
+        chains:
+          enables: []
+          enabled_by: []
+          related: [node-bump-hard-error]
+        effort: small
+        effort_notes: "Log level change + README addition"
+
+      - slug: detect-stubs-no-tool-probing
+        title: "Five ecosystem detectors are stubs without tool probing"
+        concern: advisory
+        locations:
+          - path: crates/scrat-core/src/detect/mod.rs
+            start_line: 111
+            end_line: 126
+        evidence: |
+          /// Stub detection for Node ecosystem (future implementation).
+          fn detect_node_stub(version_strategy: VersionStrategy) -> ProjectDetection {
+              use crate::ecosystem::DetectedTools;
+
+              ProjectDetection {
+                  ecosystem: Ecosystem::Node,
+                  version_strategy,
+                  tools: DetectedTools {
+                      test_cmd: "npm test".into(),
+                      build_cmd: "npm run build".into(),
+                      publish_cmd: Some("npm publish".into()),
+                      bump_cmd: Some("npm version --no-git-tag-version".into()),
+                      changelog_tool: None,
+                  },
+              }
+          }
+        evidence_markers:
+          - lines: "1"
+            type: mark
+            label: "Stub — hardcoded tools without PATH probing"
+          - lines: "13"
+            type: del
+            label: "changelog_tool: None even when git-cliff is present"
+        mechanism: |
+          The Rust detector (detect_rust in detect/rust.rs) probes for cargo-nextest,
+          cargo-set-version, and git-cliff on PATH. The Node/Go/PHP/Python/Ruby/Swift
+          stubs hardcode tool commands without checking whether the binary exists.
+          More critically, all stubs set changelog_tool: None even when
+          detect_version_strategy() already found git-cliff on PATH. This means the
+          version_strategy might be ConventionalCommits but changelog_tool is None,
+          which could cause the changelog phase to silently skip.
+        remediation: |
+          Wire the git-cliff detection result from detect_version_strategy() into the
+          changelog_tool field for all detection paths. Consider probing for ecosystem
+          tools (npm, go, composer) to set more accurate defaults.
+        temporal:
+          introduced: 2026-02-09
+          last_modified: 2026-04-03
+          commit_count: 7
+          monthly_commits: [0,0,0,0,0,0,0,0,0,0,5,2]
+        chains:
+          enables: []
+          enabled_by: []
+          related: [node-bump-hard-error]
+        effort: medium
+        effort_notes: "changelog_tool wiring is small; full tool probing is medium"
+
+  - slug: pipeline-efficiency
+    title: "The Pipeline Efficiency Surface"
+    thesis: "The ship pipeline spawns redundant subprocesses and serializes the pipeline context unconditionally, adding measurable latency to every release."
+    verdict: "None of these findings affect correctness. They add up to roughly 1-3 seconds of unnecessary work per release: a network fetch, two extra git rev-parse calls, redundant ecosystem detection, and up to 12 JSON serializations. For a tool that runs infrequently, these are polish items, but the git fetch during preflight is user-visible latency."
+
+    flow:
+      - id: preflight-start
+        label: "Start preflight"
+        type: start
+      - id: detect-eco
+        label: "Detect ecosystem"
+        type: process
+        findings:
+          - slug: duplicate-detection-calls
+            label: "Runs 2-3 times"
+      - id: git-fetch
+        label: "git fetch"
+        type: process
+        findings:
+          - slug: preflight-git-fetch-blocks-startup
+            label: "Blocks 1-5s"
+      - id: check-branch
+        label: "git rev-parse branch"
+        type: process
+        findings:
+          - slug: redundant-git-current-branch
+            label: "Called 3 times"
+      - id: plan
+        label: "Plan ship"
+        type: process
+      - id: execute-phases
+        label: "Execute 7 phases"
+        type: process
+      - id: hook-points
+        label: "12 hook points"
+        type: process
+        findings:
+          - slug: pipeline-context-serialized-unconditionally
+            label: "JSON per point"
+      - id: done
+        label: "Ship complete"
+        type: end
+
+    findings:
+      - slug: pipeline-context-serialized-unconditionally
+        title: "PipelineContext serialized to JSON up to 12 times per ship run"
+        concern: advisory
+        locations:
+          - path: crates/scrat-core/src/ship.rs
+            start_line: 914
+            end_line: 920
+        evidence: |
+          if !dry_run {
+              let pipeline_json =
+                  serde_json::to_string(pipeline_ctx).map_err(|e| ShipError::PhaseFailed {
+                      phase,
+                      message: format!("failed to serialize pipeline context: {e}"),
+                  })?;
+              let output = hooks::run_hooks(cmds, context, project_root, Some(&pipeline_json))?;
+        evidence_markers:
+          - lines: "2-3"
+            type: mark
+            label: "Serializes even when no filter: hooks exist"
+        mechanism: |
+          run_phase_hooks() serializes the entire PipelineContext to JSON before calling
+          hooks::run_hooks(), even when no filter: hooks are present. With 12 hook points
+          and PipelineContext growing as phases complete (release_notes can be multi-KB),
+          this is 12 serialize-and-drop cycles. The JSON is only consumed if a filter:
+          hook is present, which is a rare advanced feature.
+        remediation: |
+          Check whether the command list contains any "filter:" prefixed commands before
+          serializing: cmds.iter().any(|c| c.starts_with("filter:")).
+        temporal:
+          introduced: 2026-02-10
+          last_modified: 2026-04-09
+          commit_count: 15
+          monthly_commits: [0,0,0,0,0,0,0,0,0,0,8,7]
+        chains:
+          enables: []
+          enabled_by: []
+          related: []
+        effort: trivial
+        effort_notes: "Add one conditional check before the serialize call"
+
+      - slug: duplicate-detection-calls
+        title: "Ecosystem detection runs 2-3 times for the same project root"
+        concern: advisory
+        locations:
+          - path: crates/scrat-core/src/preflight.rs
+            start_line: 84
+            end_line: 84
+          - path: crates/scrat-core/src/bump.rs
+            start_line: 123
+            end_line: 123
+        evidence: |
+          let detection = detect::resolve_detection(project_root, config);
+        evidence_markers:
+          - lines: "1"
+            type: mark
+            label: "Called separately in preflight and bump"
+        mechanism: |
+          resolve_detection() scans for marker files and probes PATH for binaries
+          (which::which). It is called from run_preflight(), then again from
+          plan_bump() via plan_ship(). These are pure functions of (project_root,
+          config) — the result cannot change between calls within a single invocation.
+        remediation: |
+          Run detection once in plan_ship, then pass the result to both run_preflight
+          and plan_bump. run_preflight's signature would need a new detection parameter.
+        temporal:
+          introduced: 2026-02-09
+          last_modified: 2026-04-04
+          commit_count: 9
+          monthly_commits: [0,0,0,0,0,0,0,0,0,0,5,4]
+        chains:
+          enables: []
+          enabled_by: []
+          related: [redundant-git-current-branch]
+        effort: small
+        effort_notes: "Thread the detection result through existing parameters"
+
+      - slug: redundant-git-current-branch
+        title: "git current_branch() spawns 3 processes for an invariant value"
+        concern: note
+        locations:
+          - path: crates/scrat-core/src/preflight.rs
+            start_line: 173
+            end_line: 173
+          - path: crates/scrat-core/src/ship.rs
+            start_line: 420
+            end_line: 420
+          - path: crates/scrat-core/src/ship.rs
+            start_line: 1045
+            end_line: 1045
+        evidence: |
+          let current = match git::current_branch() {
+        evidence_markers:
+          - lines: "1"
+            type: mark
+            label: "Called in preflight, execute init, and git phase"
+        mechanism: |
+          Three separate git rev-parse --abbrev-ref HEAD spawns for a value that
+          cannot change during the pipeline (working tree is verified clean at
+          preflight, scrat owns all subsequent git operations). Each spawn costs
+          ~5-15ms of fork+exec overhead.
+        remediation: |
+          Cache the branch name in the plan phase and thread it through to execute().
+          PipelineContextInit already has a branch field.
+        temporal:
+          introduced: 2026-02-09
+          last_modified: 2026-04-09
+          commit_count: 15
+          monthly_commits: [0,0,0,0,0,0,0,0,0,0,8,7]
+        chains:
+          enables: []
+          enabled_by: []
+          related: [duplicate-detection-calls]
+        effort: small
+        effort_notes: "Thread existing value through function parameters"
+
+      - slug: preflight-git-fetch-blocks-startup
+        title: "Preflight runs git fetch on every ship invocation"
+        concern: advisory
+        locations:
+          - path: crates/scrat-core/src/git.rs
+            start_line: 94
+            end_line: 95
+        evidence: |
+          // Fetch to get latest remote state (non-fatal if it fails)
+          let _ = git(&["fetch", "--quiet"]);
+        evidence_markers:
+          - lines: "2"
+            type: mark
+            label: "Network call before user sees any output"
+        mechanism: |
+          git fetch is a synchronous network round-trip. On slow networks or when
+          GitHub is under load, this dominates startup latency (1-5 seconds). The
+          user experiences a pause before seeing any output. The fetch result is
+          used only to compare commit hashes — if the user just pushed, local refs
+          are already current.
+        remediation: |
+          Consider making the fetch optional: skip if the remote tracking ref was
+          updated recently (check reflog timestamp), or add a --no-fetch flag.
+          The current let _ = already acknowledges this is best-effort.
+        temporal:
+          introduced: 2026-02-09
+          last_modified: 2026-04-04
+          commit_count: 4
+          monthly_commits: [0,0,0,0,0,0,0,0,0,0,3,1]
+        chains:
+          enables: []
+          enabled_by: []
+          related: [git-fetch-silently-discarded]
+        effort: medium
+        effort_notes: "Needs design decision on cache strategy or flag"
+
+  - slug: type-design
+    title: "The Type Design Surface"
+    thesis: "The public API is well-structured for its primary consumer (the CLI binary) but has missing derives and one architectural coupling that would hinder library consumers."
+    verdict: "The type system does its job — enums with match dispatch, typed errors, plan/execute pattern. The gaps are all polish: missing Debug on a public struct, a library depending on clap for two derives, representable-but-invalid config states. None affect the CLI user; all affect anyone embedding scrat-core as a library."
+
+    findings:
+      - slug: version-file-config-mutual-exclusion
+        title: "VersionFileConfig field/fields mutual exclusion not type-enforced"
+        concern: advisory
+        locations:
+          - path: crates/scrat-core/src/config.rs
+            start_line: 238
+            end_line: 250
+        evidence: |
+          #[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
+          pub struct VersionFileConfig {
+              /// File path relative to project root. Supports globs (`*`, `**`).
+              pub path: String,
+              /// File format — determines how the file is parsed and updated.
+              pub format: VersionFileFormat,
+              /// Dot-path to the version field (e.g., `"version"`, `"metadata.version"`).
+              /// Mutually exclusive with `fields`.
+              pub field: Option<String>,
+              /// Multiple dot-paths to update in one file.
+              /// Mutually exclusive with `field`.
+              pub fields: Option<Vec<String>>,
+          }
+        evidence_markers:
+          - lines: "7-8"
+            type: mark
+            label: "Mutually exclusive documented but not enforced"
+          - lines: "10-11"
+            type: mark
+            label: "Both can be Some simultaneously"
+        mechanism: |
+          Both field and fields can be Some simultaneously, which is a
+          representable-but-invalid state. The consuming code (version_files.rs:381-385)
+          does catch this with a hard BumpError at runtime, so the contradiction
+          is enforced — but only at runtime, not at the type level.
+        remediation: |
+          Replace with an enum: VersionFields { Single(String), Multiple(Vec<String>) }.
+          Use #[serde(untagged)] for backward-compatible deserialization.
+        temporal:
+          introduced: 2026-04-09
+          last_modified: 2026-04-09
+          commit_count: 1
+          monthly_commits: [0,0,0,0,0,0,0,0,0,0,0,1]
+        chains:
+          enables: []
+          enabled_by: []
+          related: []
+        effort: small
+        effort_notes: "Enum + serde untagged"
+
+      - slug: pipeline-context-init-missing-debug
+        title: "PipelineContextInit is a public type missing Debug derive"
+        concern: advisory
+        locations:
+          - path: crates/scrat-core/src/pipeline.rs
+            start_line: 138
+            end_line: 161
+        evidence: |
+          pub struct PipelineContextInit {
+              /// New version string.
+              pub version: String,
+              /// Previous version string.
+              pub previous_version: String,
+              /// Git tag for this release.
+              pub tag: String,
+              /// Git tag for the previous release.
+              pub previous_tag: String,
+              /// Repository owner.
+              pub owner: String,
+              /// Repository name.
+              pub repo: String,
+              /// Full repository URL.
+              pub repo_url: Option<String>,
+              /// Current git branch.
+              pub branch: Option<String>,
+              /// Detected ecosystem name.
+              pub ecosystem: String,
+              /// Path to the changelog file.
+              pub changelog_path: String,
+              /// Whether this is a dry run.
+              pub dry_run: bool,
+          }
+        evidence_markers:
+          - lines: "1"
+            type: del
+            label: "No derive macros at all — no Debug, Clone, or PartialEq"
+        mechanism: |
+          A public 11-field struct with zero derive macros. All fields are String,
+          Option<String>, or bool — all derivable. Per Rust API guidelines, Debug is
+          essential for any public type. The workspace lints warn on missing_docs
+          but not missing Debug.
+        remediation: |
+          Add #[derive(Debug, Clone)] to PipelineContextInit. One-line change.
+        temporal:
+          introduced: 2026-02-10
+          last_modified: 2026-02-10
+          commit_count: 2
+          monthly_commits: [0,0,0,0,0,0,0,0,0,0,2,0]
+        chains:
+          enables: []
+          enabled_by: []
+          related: [pipeline-types-missing-eq-hash]
+        effort: trivial
+        effort_notes: "Add one derive line"
+
+      - slug: clap-in-core-crate
+        title: "scrat-core depends on clap despite being a library crate"
+        concern: advisory
+        locations:
+          - path: crates/scrat-core/Cargo.toml
+            start_line: 33
+            end_line: 33
+        evidence: |
+          clap = { version = "4.6", features = ["derive"] }
+        evidence_markers:
+          - lines: "1"
+            type: del
+            label: "CLI framework dependency in a library crate"
+        mechanism: |
+          scrat-core pulls in clap (including clap_derive proc macro) solely to derive
+          ValueEnum on two enums in init.rs (ConfigFormat and ConfigStyle). The binary
+          already depends on clap, so the compile-time cost is paid once regardless.
+          The real cost is coupling: scrat-core's public API now depends on clap's
+          ValueEnum trait, making the core library unusable without clap.
+        remediation: |
+          Move ConfigFormat and ConfigStyle to the CLI crate, or define the enums in
+          core without ValueEnum and implement the clap mapping in the CLI via From.
+        temporal:
+          introduced: 2026-02-09
+          last_modified: 2026-04-03
+          commit_count: 9
+          monthly_commits: [0,0,0,0,0,0,0,0,0,0,6,3]
+        chains:
+          enables: []
+          enabled_by: []
+          related: []
+        effort: small
+        effort_notes: "Move two enums or split the derive"
+
+      - slug: scrat-core-lib-incomplete-reexports
+        title: "scrat-core lib.rs does not re-export key types for library consumers"
+        concern: advisory
+        locations:
+          - path: crates/scrat-core/src/lib.rs
+            start_line: 72
+            end_line: 78
+        evidence: |
+          pub use config::{Config, ConfigLoader, LogLevel};
+          pub use error::{ConfigError, ConfigResult};
+          // Re-export semver so downstream crates don't need a direct dependency.
+          pub use semver;
+        evidence_markers:
+          - lines: "1-2"
+            type: mark
+            label: "Only config types re-exported — no ship, bump, or ecosystem types"
+        mechanism: |
+          A library consumer must write scrat_core::ship::plan_ship,
+          scrat_core::ecosystem::Ecosystem, etc. Key workflow types like ShipOptions,
+          ShipPlan, Ecosystem, and ProjectDetection have no top-level re-exports.
+          All modules are pub, so the types are reachable, but the ergonomics for
+          embedding are minimal.
+        remediation: |
+          Add re-exports for commonly used types: Ecosystem, ProjectDetection,
+          ShipOptions, ShipPlan, BumpPlan, PipelineContext. Or add a pub mod prelude.
+        temporal:
+          introduced: 2026-02-09
+          last_modified: 2026-04-09
+          commit_count: 12
+          monthly_commits: [0,0,0,0,0,0,0,0,0,0,6,6]
+        chains:
+          enables: []
+          enabled_by: []
+          related: [pipeline-context-init-missing-debug]
+        effort: small
+        effort_notes: "Add ~10 pub use lines to lib.rs"
+
+      - slug: pipeline-types-missing-eq-hash
+        title: "Pipeline types lack PartialEq for testing by library consumers"
+        concern: note
+        locations:
+          - path: crates/scrat-core/src/pipeline.rs
+            start_line: 28
+            end_line: 29
+        evidence: |
+          #[derive(Debug, Clone, Serialize, Deserialize)]
+          pub struct PipelineContext {
+        evidence_markers:
+          - lines: "1"
+            type: mark
+            label: "Missing PartialEq, Eq derives"
+        mechanism: |
+          PipelineContext, DepChange, ReleaseStats, and Contributor derive
+          Debug, Clone, Serialize, Deserialize but not PartialEq or Eq. Library
+          consumers cannot use assert_eq! on these types. All fields support
+          PartialEq — deriving it is safe and free.
+        remediation: |
+          Add PartialEq, Eq to the derive list for these types.
+        temporal:
+          introduced: 2026-02-10
+          last_modified: 2026-02-10
+          commit_count: 2
+          monthly_commits: [0,0,0,0,0,0,0,0,0,0,2,0]
+        chains:
+          enables: []
+          enabled_by: []
+          related: [pipeline-context-init-missing-debug]
+        effort: trivial
+        effort_notes: "Add two words to derive macros"
+
+  - slug: error-architecture
+    title: "The Error Architecture Surface"
+    thesis: "The error handling architecture is textbook Rust — typed errors, thiserror, consistent ? propagation — with one expect() in library code that should be a Result."
+    verdict: "The error architecture is the strongest aspect of this codebase. Seven thiserror enums compose cleanly via #[from]. Zero unwrap() calls in production library code. The one expect() on a temp path is the only blemish, and it is unlikely to trigger on macOS. The error hierarchy is ready for library consumers without modification."
+
+    findings:
+      - slug: conventional-version-expect-temppath
+        title: "expect() on temp file path UTF-8 conversion in library code"
+        concern: moderate
+        locations:
+          - path: crates/scrat-core/src/version/conventional.rs
+            start_line: 53
+            end_line: 57
+        evidence: |
+          tmp_file
+              .path()
+              .to_str()
+              .expect("temp path is UTF-8")
+              .to_string()
+        evidence_markers:
+          - lines: "4"
+            type: del
+            label: "expect() in a function that returns Result"
+        mechanism: |
+          compute_via_cliff returns Result<Version, VersionError> but uses expect()
+          for the temp path conversion. On systems with non-UTF-8 temp directories
+          (rare but possible on some Linux configurations), this panics in library
+          code instead of returning an error. The expect message is descriptive but
+          a library should not panic when it has a Result return type.
+        remediation: |
+          Replace with .to_str().ok_or_else(|| VersionError::ToolFailed {
+              tool: "git-cliff".into(),
+              message: "temp path is not valid UTF-8".into(),
+          })?
+        temporal:
+          introduced: 2026-02-09
+          last_modified: 2026-04-03
+          commit_count: 3
+          monthly_commits: [0,0,0,0,0,0,0,0,0,0,2,1]
+        chains:
+          enables: []
+          enabled_by: []
+          related: []
+        effort: trivial
+        effort_notes: "Replace expect with ok_or_else + ?"
+
+      - slug: cli-spinner-template-unwrap
+        title: "ProgressStyle::with_template().unwrap() inconsistent with project pattern"
+        concern: note
+        locations:
+          - path: crates/scrat/src/commands/ship.rs
+            start_line: 251
+            end_line: 253
+        evidence: |
+          ProgressStyle::with_template("  {spinner:.cyan} {msg}")
+              .unwrap()
+              .tick_strings(&["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"]),
+        evidence_markers:
+          - lines: "2"
+            type: mark
+            label: "Bare unwrap — doctor.rs uses .expect() for the same pattern"
+        mechanism: |
+          The template string is a compile-time constant and is safe, but the bare
+          unwrap is inconsistent with doctor.rs:115 which uses
+          .expect("valid template") for the same pattern. The project has zero
+          unwrap() calls in library code — this is the only one in the binary.
+        remediation: |
+          Replace .unwrap() with .expect("valid spinner template").
+        temporal:
+          introduced: 2026-02-09
+          last_modified: 2026-04-04
+          commit_count: 10
+          monthly_commits: [0,0,0,0,0,0,0,0,0,0,5,5]
+        chains:
+          enables: []
+          enabled_by: []
+          related: []
+        effort: trivial
+        effort_notes: "Change one word"
+
+summary:
+  counts:
+    critical: 0
+    significant: 2
+    moderate: 3
+    advisory: 8
+    note: 5

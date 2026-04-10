@@ -69,7 +69,15 @@ pub mod version;
 
 pub mod version_files;
 
-pub use config::{Config, ConfigLoader, LogLevel};
+pub use config::{
+    Config, ConfigLoader, LogLevel, VersionFields, VersionFileConfig, VersionFileFormat,
+};
+
+pub use ecosystem::{Ecosystem, ProjectDetection, VersionStrategy};
+
+pub use pipeline::{PipelineContext, PipelineContextInit};
+
+pub use ship::{ShipOptions, ShipPlan};
 
 pub use error::{ConfigError, ConfigResult};
 
