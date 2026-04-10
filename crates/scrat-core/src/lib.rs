@@ -67,6 +67,8 @@ pub mod stats;
 
 pub mod version;
 
+pub mod version_files;
+
 pub use config::{Config, ConfigLoader, LogLevel};
 
 pub use error::{ConfigError, ConfigResult};
