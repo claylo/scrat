@@ -19,12 +19,18 @@ impl LockfileDiffParser for RubyLockfileParser {
         let mut added: HashMap<String, String> = HashMap::new();
 
         for line in diff.lines() {
-            let (is_remove, is_add) = (line.starts_with('-'), line.starts_with('+'));
-            if !is_remove && !is_add {
+            // `strip_prefix` gives us the content with the marker removed
+            // and naturally skips context / hunk-header lines. Ruby's
+            // collect-and-merge still needs an `is_remove` flag to route
+            // entries into the right map, so we can't use the exact
+            // state-machine pattern from `deps/{rust,php,swift}.rs`.
+            let (is_remove, content) = if let Some(s) = line.strip_prefix('-') {
+                (true, s)
+            } else if let Some(s) = line.strip_prefix('+') {
+                (false, s)
+            } else {
                 continue;
-            }
-
-            let content = &line[1..];
+            };
 
             // Skip diff headers
             if content.starts_with("++") || content.starts_with("--") {
