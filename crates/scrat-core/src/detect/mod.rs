@@ -17,8 +17,13 @@
 //! }
 //! ```
 
+mod go;
 mod node;
+mod php;
+mod python;
+mod ruby;
 mod rust;
+mod swift;
 
 use std::process::Command;
 
@@ -107,175 +112,6 @@ pub fn detect_version_strategy(project_root: &Utf8Path) -> VersionStrategy {
     VersionStrategy::Interactive
 }
 
-/// Detect Go tooling. Probes for `go` on PATH.
-fn detect_go(_project_root: &Utf8Path, version_strategy: VersionStrategy) -> ProjectDetection {
-    use crate::ecosystem::DetectedTools;
-
-    let has_go = has_binary("go");
-    debug!(has_go, "probed Go tools");
-
-    let changelog_tool = version_strategy.changelog_tool();
-    ProjectDetection {
-        ecosystem: Ecosystem::Go,
-        version_strategy,
-        tools: DetectedTools {
-            test_cmd: if has_go {
-                "go test ./...".into()
-            } else {
-                String::new()
-            },
-            build_cmd: if has_go {
-                "go build ./...".into()
-            } else {
-                String::new()
-            },
-            publish_cmd: None,
-            bump_cmd: None, // Go modules version lives in git tags
-            changelog_tool,
-        },
-    }
-}
-
-/// Detect PHP/Composer tooling. Probes for `composer` on PATH.
-fn detect_php(_project_root: &Utf8Path, version_strategy: VersionStrategy) -> ProjectDetection {
-    use crate::ecosystem::DetectedTools;
-
-    let has_composer = has_binary("composer");
-    debug!(has_composer, "probed PHP tools");
-
-    let changelog_tool = version_strategy.changelog_tool();
-    ProjectDetection {
-        ecosystem: Ecosystem::Php,
-        version_strategy,
-        tools: DetectedTools {
-            test_cmd: if has_composer {
-                "composer test".into()
-            } else {
-                String::new()
-            },
-            build_cmd: String::new(),
-            publish_cmd: None,
-            bump_cmd: None, // PHP bump is done directly in composer.json
-            changelog_tool,
-        },
-    }
-}
-
-/// Detect Python tooling. Probes for `pytest`, `uv`, `python`, and `twine`.
-fn detect_python(_project_root: &Utf8Path, version_strategy: VersionStrategy) -> ProjectDetection {
-    use crate::ecosystem::DetectedTools;
-
-    let has_uv = has_binary("uv");
-    let has_pytest = has_binary("pytest");
-    let has_python = has_binary("python3") || has_binary("python");
-    let has_twine = has_binary("twine");
-    debug!(
-        has_uv,
-        has_pytest, has_python, has_twine, "probed Python tools"
-    );
-
-    let test_cmd = if has_uv {
-        "uv run pytest".into()
-    } else if has_pytest {
-        "pytest".into()
-    } else {
-        String::new()
-    };
-    let build_cmd = if has_uv {
-        "uv build".into()
-    } else if has_python {
-        "python -m build".into()
-    } else {
-        String::new()
-    };
-    let publish_cmd = if has_uv {
-        Some("uv publish".into())
-    } else if has_twine {
-        Some("twine upload dist/*".into())
-    } else {
-        None
-    };
-
-    let changelog_tool = version_strategy.changelog_tool();
-    ProjectDetection {
-        ecosystem: Ecosystem::Python,
-        version_strategy,
-        tools: DetectedTools {
-            test_cmd,
-            build_cmd,
-            publish_cmd,
-            bump_cmd: None, // Python bump is done directly in pyproject.toml
-            changelog_tool,
-        },
-    }
-}
-
-/// Detect Ruby tooling. Probes for `bundle`, `rake`, and `gem`.
-fn detect_ruby(_project_root: &Utf8Path, version_strategy: VersionStrategy) -> ProjectDetection {
-    use crate::ecosystem::DetectedTools;
-
-    let has_bundle = has_binary("bundle");
-    let has_rake = has_binary("rake");
-    let has_gem = has_binary("gem");
-    debug!(has_bundle, has_rake, has_gem, "probed Ruby tools");
-
-    let test_cmd = if has_bundle && has_rake {
-        "bundle exec rake test".into()
-    } else if has_rake {
-        "rake test".into()
-    } else {
-        String::new()
-    };
-    let build_cmd = if has_gem {
-        "gem build".into()
-    } else {
-        String::new()
-    };
-    let publish_cmd = has_gem.then(|| "gem push".to_string());
-
-    let changelog_tool = version_strategy.changelog_tool();
-    ProjectDetection {
-        ecosystem: Ecosystem::Ruby,
-        version_strategy,
-        tools: DetectedTools {
-            test_cmd,
-            build_cmd,
-            publish_cmd,
-            bump_cmd: None, // handled via lib/**/version.rb + gemspec
-            changelog_tool,
-        },
-    }
-}
-
-/// Detect Swift tooling. Probes for `swift` on PATH.
-fn detect_swift(_project_root: &Utf8Path, version_strategy: VersionStrategy) -> ProjectDetection {
-    use crate::ecosystem::DetectedTools;
-
-    let has_swift = has_binary("swift");
-    debug!(has_swift, "probed Swift tools");
-
-    let changelog_tool = version_strategy.changelog_tool();
-    ProjectDetection {
-        ecosystem: Ecosystem::Swift,
-        version_strategy,
-        tools: DetectedTools {
-            test_cmd: if has_swift {
-                "swift test".into()
-            } else {
-                String::new()
-            },
-            build_cmd: if has_swift {
-                "swift build -c release".into()
-            } else {
-                String::new()
-            },
-            publish_cmd: None, // SwiftPM publishes via git tags
-            bump_cmd: None,
-            changelog_tool,
-        },
-    }
-}
-
 /// Build a [`ProjectDetection`] for a user-selected ecosystem.
 ///
 /// Called after the CLI prompts the user to choose an ecosystem when
@@ -298,11 +134,11 @@ fn build_detection_for(
     match ecosystem {
         Ecosystem::Rust => rust::detect_rust(project_root, version_strategy),
         Ecosystem::Node => node::detect_node(project_root, version_strategy),
-        Ecosystem::Go => detect_go(project_root, version_strategy),
-        Ecosystem::Php => detect_php(project_root, version_strategy),
-        Ecosystem::Python => detect_python(project_root, version_strategy),
-        Ecosystem::Ruby => detect_ruby(project_root, version_strategy),
-        Ecosystem::Swift => detect_swift(project_root, version_strategy),
+        Ecosystem::Go => go::detect_go(project_root, version_strategy),
+        Ecosystem::Php => php::detect_php(project_root, version_strategy),
+        Ecosystem::Python => python::detect_python(project_root, version_strategy),
+        Ecosystem::Ruby => ruby::detect_ruby(project_root, version_strategy),
+        Ecosystem::Swift => swift::detect_swift(project_root, version_strategy),
         Ecosystem::Generic => ProjectDetection::generic(version_strategy),
     }
 }
