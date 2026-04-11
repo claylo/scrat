@@ -43,12 +43,11 @@ pub fn resolve_detection(
     {
         debug!(%ecosystem, "using ecosystem from config override");
         let version_strategy = detect_version_strategy(project_root);
-        let detection = if ecosystem == Ecosystem::Rust {
-            rust::detect_rust(project_root, version_strategy)
-        } else {
-            build_detection_for(ecosystem, version_strategy)
-        };
-        return Some(detection);
+        return Some(build_detection_for(
+            project_root,
+            ecosystem,
+            version_strategy,
+        ));
     }
 
     // Fall back to auto-detection
@@ -67,12 +66,11 @@ pub fn detect_project(project_root: &Utf8Path) -> Option<ProjectDetection> {
     let version_strategy = detect_version_strategy(project_root);
     debug!(%version_strategy, "detected version strategy");
 
-    let detection = if ecosystem == Ecosystem::Rust {
-        rust::detect_rust(project_root, version_strategy)
-    } else {
-        build_detection_for(ecosystem, version_strategy)
-    };
-    Some(detection)
+    Some(build_detection_for(
+        project_root,
+        ecosystem,
+        version_strategy,
+    ))
 }
 
 /// Identify the ecosystem by scanning for marker files.
@@ -111,7 +109,7 @@ pub fn detect_version_strategy(project_root: &Utf8Path) -> VersionStrategy {
 /// Detect Node.js tooling. Probes for `npm`/`yarn`/`pnpm` and picks a
 /// sensible package manager for test/build/publish. The version bump is
 /// always a direct `package.json` edit — scrat is not a lockfile manager.
-fn detect_node(version_strategy: VersionStrategy) -> ProjectDetection {
+fn detect_node(_project_root: &Utf8Path, version_strategy: VersionStrategy) -> ProjectDetection {
     use crate::ecosystem::DetectedTools;
 
     let has_npm = has_binary("npm");
@@ -155,7 +153,7 @@ fn detect_node(version_strategy: VersionStrategy) -> ProjectDetection {
 }
 
 /// Detect Go tooling. Probes for `go` on PATH.
-fn detect_go(version_strategy: VersionStrategy) -> ProjectDetection {
+fn detect_go(_project_root: &Utf8Path, version_strategy: VersionStrategy) -> ProjectDetection {
     use crate::ecosystem::DetectedTools;
 
     let has_go = has_binary("go");
@@ -184,7 +182,7 @@ fn detect_go(version_strategy: VersionStrategy) -> ProjectDetection {
 }
 
 /// Detect PHP/Composer tooling. Probes for `composer` on PATH.
-fn detect_php(version_strategy: VersionStrategy) -> ProjectDetection {
+fn detect_php(_project_root: &Utf8Path, version_strategy: VersionStrategy) -> ProjectDetection {
     use crate::ecosystem::DetectedTools;
 
     let has_composer = has_binary("composer");
@@ -209,7 +207,7 @@ fn detect_php(version_strategy: VersionStrategy) -> ProjectDetection {
 }
 
 /// Detect Python tooling. Probes for `pytest`, `uv`, `python`, and `twine`.
-fn detect_python(version_strategy: VersionStrategy) -> ProjectDetection {
+fn detect_python(_project_root: &Utf8Path, version_strategy: VersionStrategy) -> ProjectDetection {
     use crate::ecosystem::DetectedTools;
 
     let has_uv = has_binary("uv");
@@ -258,7 +256,7 @@ fn detect_python(version_strategy: VersionStrategy) -> ProjectDetection {
 }
 
 /// Detect Ruby tooling. Probes for `bundle`, `rake`, and `gem`.
-fn detect_ruby(version_strategy: VersionStrategy) -> ProjectDetection {
+fn detect_ruby(_project_root: &Utf8Path, version_strategy: VersionStrategy) -> ProjectDetection {
     use crate::ecosystem::DetectedTools;
 
     let has_bundle = has_binary("bundle");
@@ -295,7 +293,7 @@ fn detect_ruby(version_strategy: VersionStrategy) -> ProjectDetection {
 }
 
 /// Detect Swift tooling. Probes for `swift` on PATH.
-fn detect_swift(version_strategy: VersionStrategy) -> ProjectDetection {
+fn detect_swift(_project_root: &Utf8Path, version_strategy: VersionStrategy) -> ProjectDetection {
     use crate::ecosystem::DetectedTools;
 
     let has_swift = has_binary("swift");
@@ -329,55 +327,27 @@ fn detect_swift(version_strategy: VersionStrategy) -> ProjectDetection {
 /// auto-detection returns `None`.
 pub fn build_detection(project_root: &Utf8Path, ecosystem: Ecosystem) -> ProjectDetection {
     let version_strategy = detect_version_strategy(project_root);
-    build_detection_for(ecosystem, version_strategy)
+    build_detection_for(project_root, ecosystem, version_strategy)
 }
 
-/// Map an ecosystem + version strategy to a [`ProjectDetection`].
+/// Dispatch an ecosystem to its per-ecosystem detection helper.
 ///
-/// Single source of truth for ecosystem → tool defaults. Used by
-/// `detect_project`, `resolve_detection`, and `build_detection`.
+/// Pure delegation table — every arm forwards to the function that
+/// owns that ecosystem's detection logic. Used by `detect_project`,
+/// `resolve_detection`, and `build_detection`.
 fn build_detection_for(
+    project_root: &Utf8Path,
     ecosystem: Ecosystem,
     version_strategy: VersionStrategy,
 ) -> ProjectDetection {
-    use crate::ecosystem::DetectedTools;
-
     match ecosystem {
-        Ecosystem::Rust => {
-            // Rust has full detection logic in its own module
-            // but we don't have project_root here — callers that need
-            // Rust-specific detection call rust::detect_rust directly.
-            // This arm is used only for config-override and user-selection paths.
-            let has_cargo = has_binary("cargo");
-            let has_nextest = has_binary("cargo-nextest");
-            let has_cargo_edit = has_binary("cargo-set-version");
-            let test_cmd = if has_nextest {
-                "cargo nextest run".into()
-            } else if has_cargo {
-                "cargo test".into()
-            } else {
-                String::new()
-            };
-            let bump_cmd = has_cargo_edit.then(|| "cargo set-version".to_string());
-            let changelog_tool = version_strategy.changelog_tool();
-            ProjectDetection {
-                ecosystem: Ecosystem::Rust,
-                version_strategy,
-                tools: DetectedTools {
-                    test_cmd,
-                    build_cmd: "cargo build --release".into(),
-                    publish_cmd: has_cargo.then(|| "cargo publish".to_string()),
-                    bump_cmd,
-                    changelog_tool,
-                },
-            }
-        }
-        Ecosystem::Node => detect_node(version_strategy),
-        Ecosystem::Go => detect_go(version_strategy),
-        Ecosystem::Php => detect_php(version_strategy),
-        Ecosystem::Python => detect_python(version_strategy),
-        Ecosystem::Ruby => detect_ruby(version_strategy),
-        Ecosystem::Swift => detect_swift(version_strategy),
+        Ecosystem::Rust => rust::detect_rust(project_root, version_strategy),
+        Ecosystem::Node => detect_node(project_root, version_strategy),
+        Ecosystem::Go => detect_go(project_root, version_strategy),
+        Ecosystem::Php => detect_php(project_root, version_strategy),
+        Ecosystem::Python => detect_python(project_root, version_strategy),
+        Ecosystem::Ruby => detect_ruby(project_root, version_strategy),
+        Ecosystem::Swift => detect_swift(project_root, version_strategy),
         Ecosystem::Generic => ProjectDetection::generic(version_strategy),
     }
 }
