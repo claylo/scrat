@@ -63,8 +63,12 @@ impl LockfileDiffParser for NodeLockfileParser {
                 match (is_removal, is_addition) {
                     (true, _) => old_version = Some(version),
                     (_, true) => new_version = Some(version),
-                    // Context lines (unchanged) provide the baseline version for
-                    // blocks where only one side actually changes a field.
+                    // Context lines (unchanged) seed both `old_version` and
+                    // `new_version` with the same value. The deliberate
+                    // equality is caught by `emit_change` at
+                    // `deps/mod.rs:127-129`, which suppresses entries with
+                    // equal from/to — so blocks where only a non-version
+                    // field (e.g., `resolved`) moved correctly emit nothing.
                     _ => {
                         if old_version.is_none() {
                             old_version = Some(version.clone());

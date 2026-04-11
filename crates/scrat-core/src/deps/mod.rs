@@ -21,31 +21,24 @@ use crate::git;
 use crate::pipeline::DepChange;
 
 mod rust;
-
 pub use rust::RustLockfileParser;
 
 mod node;
-
 pub use node::NodeLockfileParser;
 
 mod go;
-
 pub use go::GoLockfileParser;
 
 mod php;
-
 pub use php::PhpLockfileParser;
 
 mod python;
-
 pub use python::PythonLockfileParser;
 
 mod ruby;
-
 pub use ruby::RubyLockfileParser;
 
 mod swift;
-
 pub use swift::SwiftLockfileParser;
 
 /// Parses a unified diff of an ecosystem-specific lockfile into
@@ -169,6 +162,8 @@ pub(super) fn extract_json_string_value(line: &str, key: &str) -> Option<String>
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // ── TOML string extractor ───────────────────────────────────────
 
     #[test]
     fn extract_toml_string_value_basic() {

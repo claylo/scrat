@@ -18,13 +18,21 @@ impl LockfileDiffParser for GoLockfileParser {
         let mut added: HashMap<String, String> = HashMap::new();
 
         for line in diff.lines() {
-            let (is_remove, is_add) = (line.starts_with('-'), line.starts_with('+'));
-            if !is_remove && !is_add {
+            // `strip_prefix` gives us the content with the marker removed
+            // and naturally skips context / hunk-header lines. Go's
+            // collect-and-merge still needs an `is_remove` flag to route
+            // entries into the right map, so we can't use the exact
+            // state-machine pattern from `deps/{rust,php,swift}.rs`.
+            let (is_remove, content) = if let Some(s) = line.strip_prefix('-') {
+                (true, s)
+            } else if let Some(s) = line.strip_prefix('+') {
+                (false, s)
+            } else {
                 continue;
-            }
+            };
 
-            // Strip diff prefix and whitespace
-            let content = line[1..].trim();
+            // Strip any leading whitespace (tabs in `go.mod`, spaces in blocks)
+            let content = content.trim();
 
             // Skip diff headers and require/block markers
             if content.starts_with("++")
