@@ -17,6 +17,7 @@
 //! }
 //! ```
 
+mod node;
 mod rust;
 
 use std::process::Command;
@@ -104,52 +105,6 @@ pub fn detect_version_strategy(project_root: &Utf8Path) -> VersionStrategy {
     }
 
     VersionStrategy::Interactive
-}
-
-/// Detect Node.js tooling. Probes for `npm`/`yarn`/`pnpm` and picks a
-/// sensible package manager for test/build/publish. The version bump is
-/// always a direct `package.json` edit — scrat is not a lockfile manager.
-fn detect_node(_project_root: &Utf8Path, version_strategy: VersionStrategy) -> ProjectDetection {
-    use crate::ecosystem::DetectedTools;
-
-    let has_npm = has_binary("npm");
-    let has_yarn = has_binary("yarn");
-    let has_pnpm = has_binary("pnpm");
-    debug!(has_npm, has_yarn, has_pnpm, "probed Node tools");
-
-    let (test_cmd, build_cmd, publish_cmd) = if has_pnpm {
-        (
-            "pnpm test".to_string(),
-            "pnpm run build".to_string(),
-            Some("pnpm publish".to_string()),
-        )
-    } else if has_yarn {
-        (
-            "yarn test".to_string(),
-            "yarn build".to_string(),
-            Some("yarn publish".to_string()),
-        )
-    } else {
-        (
-            "npm test".to_string(),
-            "npm run build".to_string(),
-            has_npm.then(|| "npm publish".to_string()),
-        )
-    };
-
-    let changelog_tool = version_strategy.changelog_tool();
-
-    ProjectDetection {
-        ecosystem: Ecosystem::Node,
-        version_strategy,
-        tools: DetectedTools {
-            test_cmd,
-            build_cmd,
-            publish_cmd,
-            bump_cmd: None, // handled via direct package.json edit
-            changelog_tool,
-        },
-    }
 }
 
 /// Detect Go tooling. Probes for `go` on PATH.
@@ -342,7 +297,7 @@ fn build_detection_for(
 ) -> ProjectDetection {
     match ecosystem {
         Ecosystem::Rust => rust::detect_rust(project_root, version_strategy),
-        Ecosystem::Node => detect_node(project_root, version_strategy),
+        Ecosystem::Node => node::detect_node(project_root, version_strategy),
         Ecosystem::Go => detect_go(project_root, version_strategy),
         Ecosystem::Php => detect_php(project_root, version_strategy),
         Ecosystem::Python => detect_python(project_root, version_strategy),

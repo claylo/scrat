@@ -50,9 +50,10 @@ The reasoning for the incremental approach: traits designed on a whiteboard tend
 
 ## Conventions used in this plan
 
-- **Commits via `commit.txt`:** Each task's commit step writes a `commit.txt` file at the repo root. Clay runs `gtxt` (alias: `git commit -F commit.txt && rm commit.txt`) to consume it. The worker does **not** run `git commit` directly. When a step says "commit", it means "write commit.txt and wait for Clay to run gtxt".
-- **Test cadence:** Full workspace test runs can be slow on this machine. Each task runs `cargo check -p scrat-core` and `cargo clippy -p scrat-core --all-targets -- -D warnings` (both fast). Running `cargo nextest run -p scrat-core detect::` is fine — the detect test module is small (14 tests). Running the full workspace suite requires asking Clay first.
-- **Branch:** `refactor/ecosystem-modules-phase-1`. One branch, multiple commits, one PR at the end.
+- **Commits via `commit.txt` — APPEND, do not overwrite:** Each task's commit step APPENDS a sub-bullet section to `commit.txt` at the repo root. It does **not** overwrite the existing file. Clay runs `gtxt` (alias: `git commit -F commit.txt && rm commit.txt`) periodically — sometimes after every task, sometimes after batching several. When `gtxt` runs, the entire accumulated `commit.txt` becomes one bundled commit, and the file is deleted. The next task that produces a commit must re-create the skeleton. The worker does **not** run `git commit` directly.
+- **Bundled-commit format:** `commit.txt` follows the structure used in `f706dc9` and `974deb4` — one top-level subject line, a brief opening body paragraph, then multiple `* type(scope): subject` sub-bullet sections (each with its own body paragraph at column 0, NOT indented under the `*`). Each task contributes one sub-bullet section.
+- **Test cadence:** Full workspace test runs can be slow on this machine. Each task runs `cargo check -p scrat-core` and `cargo clippy -p scrat-core --all-targets -- -D warnings` (both fast). Running `cargo nextest run -p scrat-core detect::` is fine — the detect test module is small (15 tests). Running the full workspace suite requires asking Clay first.
+- **Branch:** `refactor/ecosystem-modules-phase-1`. One branch, several bundled commits via `gtxt`, one PR at the end.
 
 ---
 
