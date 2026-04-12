@@ -50,19 +50,25 @@ impl fmt::Display for Ecosystem {
 }
 
 impl Ecosystem {
-    /// Filename that signals this ecosystem when found in a directory.
+    /// Filenames that signal this ecosystem when any of them is found
+    /// in a directory.
     ///
-    /// Returns `None` for [`Generic`](Self::Generic) which has no marker file.
-    pub const fn marker_file(self) -> Option<&'static str> {
+    /// Returns a slice to support ecosystems where multiple marker files
+    /// can indicate the same project type — for example, a future
+    /// `AgentSkill` variant might match `plugin.json`,
+    /// `.claude-plugin/plugin.json`, and `.bito.yaml`. Every current
+    /// ecosystem returns a single-element slice; [`Generic`](Self::Generic)
+    /// returns an empty slice.
+    pub const fn marker_files(self) -> &'static [&'static str] {
         match self {
-            Self::Rust => Some("Cargo.toml"),
-            Self::Node => Some("package.json"),
-            Self::Go => Some("go.mod"),
-            Self::Php => Some("composer.json"),
-            Self::Python => Some("pyproject.toml"),
-            Self::Ruby => Some("Gemfile"),
-            Self::Swift => Some("Package.swift"),
-            Self::Generic => None,
+            Self::Rust => &["Cargo.toml"],
+            Self::Node => &["package.json"],
+            Self::Go => &["go.mod"],
+            Self::Php => &["composer.json"],
+            Self::Python => &["pyproject.toml"],
+            Self::Ruby => &["Gemfile"],
+            Self::Swift => &["Package.swift"],
+            Self::Generic => &[],
         }
     }
 
@@ -124,6 +130,24 @@ impl Ecosystem {
                 "breaking_always_bump_minor = false\n",
                 "breaking_always_bump_major = true\n",
             ),
+        }
+    }
+
+    /// Return the [`EcosystemDriver`](super::EcosystemDriver) implementation
+    /// for this ecosystem.
+    ///
+    /// Drivers are zero-sized unit structs; the returned reference is
+    /// `'static` and incurs no allocation.
+    pub fn driver(self) -> &'static dyn super::EcosystemDriver {
+        match self {
+            Self::Rust => &super::rust::RustDriver,
+            Self::Node => &super::node::NodeDriver,
+            Self::Go => &super::go::GoDriver,
+            Self::Php => &super::php::PhpDriver,
+            Self::Python => &super::python::PythonDriver,
+            Self::Ruby => &super::ruby::RubyDriver,
+            Self::Swift => &super::swift::SwiftDriver,
+            Self::Generic => &super::generic::GenericDriver,
         }
     }
 }
@@ -240,9 +264,9 @@ mod tests {
 
     #[test]
     fn ecosystem_marker_files() {
-        assert_eq!(Ecosystem::Rust.marker_file(), Some("Cargo.toml"));
-        assert_eq!(Ecosystem::Node.marker_file(), Some("package.json"));
-        assert_eq!(Ecosystem::Generic.marker_file(), None);
+        assert_eq!(Ecosystem::Rust.marker_files(), &["Cargo.toml"]);
+        assert_eq!(Ecosystem::Node.marker_files(), &["package.json"]);
+        assert_eq!(Ecosystem::Generic.marker_files(), &[] as &[&str]);
     }
 
     #[test]

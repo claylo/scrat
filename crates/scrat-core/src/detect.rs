@@ -17,14 +17,6 @@
 //! }
 //! ```
 
-mod go;
-mod node;
-mod php;
-mod python;
-mod ruby;
-mod rust;
-mod swift;
-
 use std::process::Command;
 
 use camino::Utf8Path;
@@ -82,13 +74,15 @@ pub fn detect_project(project_root: &Utf8Path) -> Option<ProjectDetection> {
 /// Identify the ecosystem by scanning for marker files.
 ///
 /// Only checks [`Ecosystem::AUTO_DETECTABLE`] variants (those with marker
-/// files). [`Ecosystem::Generic`] is never auto-detected.
+/// files). [`Ecosystem::Generic`] is never auto-detected. An ecosystem
+/// that returns multiple marker files from [`Ecosystem::marker_files`]
+/// matches on the first marker present in `project_root`.
 fn detect_ecosystem(project_root: &Utf8Path) -> Option<Ecosystem> {
     for ecosystem in Ecosystem::AUTO_DETECTABLE {
-        if let Some(marker) = ecosystem.marker_file()
-            && project_root.join(marker).is_file()
-        {
-            return Some(*ecosystem);
+        for marker in ecosystem.marker_files() {
+            if project_root.join(marker).is_file() {
+                return Some(*ecosystem);
+            }
         }
     }
     None
@@ -121,26 +115,17 @@ pub fn build_detection(project_root: &Utf8Path, ecosystem: Ecosystem) -> Project
     build_detection_for(project_root, ecosystem, version_strategy)
 }
 
-/// Dispatch an ecosystem to its per-ecosystem detection helper.
+/// Dispatch an ecosystem to its per-ecosystem detection helper via driver.
 ///
-/// Pure delegation table — every arm forwards to the function that
-/// owns that ecosystem's detection logic. Used by `detect_project`,
-/// `resolve_detection`, and `build_detection`.
+/// One-liner: delegates to `EcosystemDriver::detect` on the ecosystem's
+/// driver. Used by `detect_project`, `resolve_detection`, and
+/// `build_detection`.
 fn build_detection_for(
     project_root: &Utf8Path,
     ecosystem: Ecosystem,
     version_strategy: VersionStrategy,
 ) -> ProjectDetection {
-    match ecosystem {
-        Ecosystem::Rust => rust::detect_rust(project_root, version_strategy),
-        Ecosystem::Node => node::detect_node(project_root, version_strategy),
-        Ecosystem::Go => go::detect_go(project_root, version_strategy),
-        Ecosystem::Php => php::detect_php(project_root, version_strategy),
-        Ecosystem::Python => python::detect_python(project_root, version_strategy),
-        Ecosystem::Ruby => ruby::detect_ruby(project_root, version_strategy),
-        Ecosystem::Swift => swift::detect_swift(project_root, version_strategy),
-        Ecosystem::Generic => ProjectDetection::generic(version_strategy),
-    }
+    ecosystem.driver().detect(project_root, version_strategy)
 }
 
 /// Check whether a binary is available on `PATH`.

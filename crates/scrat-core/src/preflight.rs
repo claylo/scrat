@@ -8,7 +8,7 @@ use tracing::{debug, instrument};
 
 use crate::config::Config;
 use crate::detect;
-use crate::ecosystem::{Ecosystem, ProjectDetection};
+use crate::ecosystem::ProjectDetection;
 use crate::git;
 use crate::ship::ShipOptions;
 
@@ -126,7 +126,7 @@ pub fn run_preflight_with_detection(
         && let Some(ref det) = detection
         && det.tools.publish_cmd.is_some()
     {
-        checks.push(check_registry_auth(det.ecosystem));
+        checks.push(det.ecosystem.driver().check_registry_auth());
     }
 
     let all_passed = checks.iter().all(|c| c.passed);
@@ -396,64 +396,6 @@ fn check_gh_auth() -> CheckResult {
             message: "gh is not authenticated — run `gh auth login`".into(),
             skip_flag: Some("--no-release".into()),
         },
-    }
-}
-
-/// Check registry auth for ecosystems that publish to a package registry.
-///
-/// Uses fast env-var checks (no network calls). The check is informational:
-/// some ecosystems support credential stores that env vars don't cover,
-/// so a missing env var is a warning-level failure.
-fn check_registry_auth(ecosystem: Ecosystem) -> CheckResult {
-    let (env_vars, registry_name, login_hint) = match ecosystem {
-        Ecosystem::Rust => (
-            vec!["CARGO_REGISTRY_TOKEN"],
-            "crates.io",
-            "set CARGO_REGISTRY_TOKEN or run `cargo login`",
-        ),
-        Ecosystem::Node => (
-            vec!["NPM_TOKEN", "NODE_AUTH_TOKEN"],
-            "npm",
-            "set NPM_TOKEN or run `npm login`",
-        ),
-        Ecosystem::Python => (
-            vec!["TWINE_PASSWORD", "PYPI_TOKEN"],
-            "PyPI",
-            "set TWINE_PASSWORD or PYPI_TOKEN",
-        ),
-        Ecosystem::Ruby => (
-            vec!["GEM_HOST_API_KEY"],
-            "RubyGems",
-            "set GEM_HOST_API_KEY or run `gem signin`",
-        ),
-        // Ecosystems without registry publish
-        _ => {
-            return CheckResult {
-                name: "Registry auth".into(),
-                passed: true,
-                message: "No registry publish for this ecosystem".into(),
-                skip_flag: None,
-            };
-        }
-    };
-
-    let found = env_vars.iter().any(|v| std::env::var(v).is_ok());
-
-    if found {
-        CheckResult {
-            name: "Registry auth".into(),
-            passed: true,
-            message: format!("{registry_name} credentials found"),
-            skip_flag: None,
-        }
-    } else {
-        let vars = env_vars.join(" or ");
-        CheckResult {
-            name: "Registry auth".into(),
-            passed: false,
-            message: format!("{vars} not set — {login_hint}"),
-            skip_flag: Some("--no-publish".into()),
-        }
     }
 }
 
@@ -1413,51 +1355,6 @@ mod tests {
             assert!(result.skip_flag.is_some());
             assert_eq!(result.skip_flag.as_deref(), Some("--no-release"));
         }
-    }
-
-    #[test]
-    fn check_registry_auth_rust() {
-        let result = check_registry_auth(Ecosystem::Rust);
-        assert_eq!(result.name, "Registry auth");
-        if !result.passed {
-            assert!(result.message.contains("CARGO_REGISTRY_TOKEN"));
-            assert_eq!(result.skip_flag.as_deref(), Some("--no-publish"));
-        }
-    }
-
-    #[test]
-    fn check_registry_auth_node() {
-        let result = check_registry_auth(Ecosystem::Node);
-        assert_eq!(result.name, "Registry auth");
-        if !result.passed {
-            assert!(result.message.contains("NPM_TOKEN"));
-            assert_eq!(result.skip_flag.as_deref(), Some("--no-publish"));
-        }
-    }
-
-    #[test]
-    fn check_registry_auth_python() {
-        let result = check_registry_auth(Ecosystem::Python);
-        assert_eq!(result.name, "Registry auth");
-        if !result.passed {
-            assert!(
-                result.message.contains("TWINE_PASSWORD") || result.message.contains("PYPI_TOKEN")
-            );
-        }
-    }
-
-    #[test]
-    fn check_registry_auth_go_skips() {
-        // Go doesn't publish via registry
-        let result = check_registry_auth(Ecosystem::Go);
-        assert!(result.passed);
-        assert!(result.message.contains("No registry publish"));
-    }
-
-    #[test]
-    fn check_registry_auth_generic_skips() {
-        let result = check_registry_auth(Ecosystem::Generic);
-        assert!(result.passed);
     }
 
     #[test]
