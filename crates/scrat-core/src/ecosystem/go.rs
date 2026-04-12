@@ -1,19 +1,78 @@
-//! Lockfile diff parser for Go's `go.mod`.
+//! Go ecosystem driver (`go.mod`).
 //!
-//! Line-oriented collect-and-merge: each `require` line is
-//! `<module> <version>`. Collects removed/added lines into maps, then
-//! merges to produce [`DepChange`] entries.
+//! `parse_lockfile_diff` walks `go.mod` as a line-oriented
+//! collect-and-merge pass, tracking `require` and `replace` entries.
+//! Go version bumping is a no-op — versions live in git tags, not
+//! in any file that scrat rewrites.
 
 use std::collections::HashMap;
 
-use super::LockfileDiffParser;
+use camino::Utf8Path;
+use semver::Version;
+use tracing::debug;
+
+use super::EcosystemDriver;
+use crate::bump::BumpResult;
+use crate::detect::has_binary;
+use crate::ecosystem::{DetectedTools, Ecosystem, ProjectDetection, VersionStrategy};
 use crate::pipeline::DepChange;
+use crate::preflight::CheckResult;
 
-/// Lockfile diff parser for Go's `go.mod`.
-pub struct GoLockfileParser;
+/// Go ecosystem driver.
+pub struct GoDriver;
 
-impl LockfileDiffParser for GoLockfileParser {
-    fn parse_diff(&self, diff: &str) -> Vec<DepChange> {
+impl EcosystemDriver for GoDriver {
+    fn bump_version_files(
+        &self,
+        _project_root: &Utf8Path,
+        _version: &Version,
+        _detection: &ProjectDetection,
+    ) -> BumpResult<Vec<String>> {
+        tracing::debug!("version lives in git tags, no file to bump");
+        Ok(Vec::new())
+    }
+
+    fn detect(
+        &self,
+        _project_root: &Utf8Path,
+        version_strategy: VersionStrategy,
+    ) -> ProjectDetection {
+        let has_go = has_binary("go");
+        debug!(has_go, "probed Go tools");
+
+        let changelog_tool = version_strategy.changelog_tool();
+
+        ProjectDetection {
+            ecosystem: Ecosystem::Go,
+            version_strategy,
+            tools: DetectedTools {
+                test_cmd: if has_go {
+                    "go test ./...".into()
+                } else {
+                    String::new()
+                },
+                build_cmd: if has_go {
+                    "go build ./...".into()
+                } else {
+                    String::new()
+                },
+                publish_cmd: None,
+                bump_cmd: None, // Go modules version lives in git tags
+                changelog_tool,
+            },
+        }
+    }
+
+    fn check_registry_auth(&self) -> CheckResult {
+        CheckResult {
+            name: "Registry auth".into(),
+            passed: true,
+            message: "No registry publish for this ecosystem".into(),
+            skip_flag: None,
+        }
+    }
+
+    fn parse_lockfile_diff(&self, diff: &str) -> Vec<DepChange> {
         let mut removed: HashMap<String, String> = HashMap::new();
         let mut added: HashMap<String, String> = HashMap::new();
 
@@ -22,7 +81,7 @@ impl LockfileDiffParser for GoLockfileParser {
             // and naturally skips context / hunk-header lines. Go's
             // collect-and-merge still needs an `is_remove` flag to route
             // entries into the right map, so we can't use the exact
-            // state-machine pattern from `deps/{rust,php,swift}.rs`.
+            // state-machine pattern from `ecosystem/{rust,php,swift}.rs`.
             let (is_remove, content) = if let Some(s) = line.strip_prefix('-') {
                 (true, s)
             } else if let Some(s) = line.strip_prefix('+') {
@@ -112,7 +171,7 @@ mod tests {
         let diff = "\
 -\tgithub.com/spf13/cobra v1.7.0
 +\tgithub.com/spf13/cobra v1.8.0";
-        let changes = GoLockfileParser.parse_diff(diff);
+        let changes = GoDriver.parse_lockfile_diff(diff);
         assert_eq!(changes.len(), 1);
         assert_eq!(changes[0].name, "github.com/spf13/cobra");
         assert_eq!(changes[0].from.as_deref(), Some("v1.7.0"));
@@ -123,7 +182,7 @@ mod tests {
     fn parse_go_mod_diff_added() {
         let diff = "\
 +\tgithub.com/new/dep v1.0.0";
-        let changes = GoLockfileParser.parse_diff(diff);
+        let changes = GoDriver.parse_lockfile_diff(diff);
         assert_eq!(changes.len(), 1);
         assert_eq!(changes[0].name, "github.com/new/dep");
         assert_eq!(changes[0].from, None);
@@ -134,7 +193,7 @@ mod tests {
     fn parse_go_mod_diff_removed() {
         let diff = "\
 -\tgithub.com/old/dep v2.0.0";
-        let changes = GoLockfileParser.parse_diff(diff);
+        let changes = GoDriver.parse_lockfile_diff(diff);
         assert_eq!(changes.len(), 1);
         assert_eq!(changes[0].name, "github.com/old/dep");
         assert_eq!(changes[0].from.as_deref(), Some("v2.0.0"));
@@ -146,7 +205,7 @@ mod tests {
         let diff = "\
 -\tgolang.org/x/sys v0.14.0 // indirect
 +\tgolang.org/x/sys v0.15.0 // indirect";
-        let changes = GoLockfileParser.parse_diff(diff);
+        let changes = GoDriver.parse_lockfile_diff(diff);
         assert_eq!(changes.len(), 1);
         assert_eq!(changes[0].name, "golang.org/x/sys");
         assert_eq!(changes[0].from.as_deref(), Some("v0.14.0"));
@@ -160,7 +219,7 @@ mod tests {
 +\tgithub.com/spf13/cobra v1.8.0
 +\tgithub.com/new/dep v1.0.0
 -\tgithub.com/old/dep v2.0.0";
-        let changes = GoLockfileParser.parse_diff(diff);
+        let changes = GoDriver.parse_lockfile_diff(diff);
         assert_eq!(changes.len(), 3);
         assert_eq!(changes[0].name, "github.com/new/dep");
         assert_eq!(changes[1].name, "github.com/old/dep");
@@ -178,7 +237,7 @@ mod tests {
 +module github.com/my/project
 -go 1.21
 +go 1.22";
-        let changes = GoLockfileParser.parse_diff(diff);
+        let changes = GoDriver.parse_lockfile_diff(diff);
         assert_eq!(changes.len(), 1);
         assert_eq!(changes[0].name, "github.com/foo/bar");
     }
@@ -188,14 +247,14 @@ mod tests {
         let diff = "\
 -\tgithub.com/pelletier/go-toml/v2 v2.1.0
 +\tgithub.com/pelletier/go-toml/v2 v2.2.0";
-        let changes = GoLockfileParser.parse_diff(diff);
+        let changes = GoDriver.parse_lockfile_diff(diff);
         assert_eq!(changes.len(), 1);
         assert_eq!(changes[0].name, "github.com/pelletier/go-toml/v2");
     }
 
     #[test]
     fn parse_go_mod_diff_empty() {
-        assert!(GoLockfileParser.parse_diff("").is_empty());
+        assert!(GoDriver.parse_lockfile_diff("").is_empty());
     }
 
     #[test]
@@ -203,11 +262,19 @@ mod tests {
         let diff = "\
 -\tgithub.com/foo/bar v0.0.0-20230905200255-921286631fa9
 +\tgithub.com/foo/bar v0.0.0-20240101120000-abcdef123456";
-        let changes = GoLockfileParser.parse_diff(diff);
+        let changes = GoDriver.parse_lockfile_diff(diff);
         assert_eq!(changes.len(), 1);
         assert_eq!(
             changes[0].from.as_deref(),
             Some("v0.0.0-20230905200255-921286631fa9")
         );
+    }
+
+    #[test]
+    fn check_registry_auth_go_skips() {
+        // Go doesn't publish via registry
+        let result = GoDriver.check_registry_auth();
+        assert!(result.passed);
+        assert!(result.message.contains("No registry publish"));
     }
 }

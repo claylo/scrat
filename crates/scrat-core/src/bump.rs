@@ -24,12 +24,6 @@ use crate::config::Config;
 use crate::ecosystem::{ChangelogTool, Ecosystem, ProjectDetection, VersionStrategy};
 use crate::version::{self, conventional, explicit, interactive};
 
-mod node;
-mod php;
-mod python;
-mod ruby;
-mod rust;
-
 // ──────────────────────────────────────────────
 // Errors
 // ──────────────────────────────────────────────
@@ -273,51 +267,35 @@ impl ReadyBump {
     ) -> BumpResult<BumpOutcome> {
         let mut modified_files = Vec::new();
 
-        // Update version in project files (Generic has no project files to update)
-        match self.detection.ecosystem {
-            Ecosystem::Rust => {
-                let files = rust::bump_rust_version(project_root, &self.next, &self.detection)?;
-                modified_files.extend(files);
-            }
-            Ecosystem::Node => {
-                let files = node::bump_node_version(project_root, &self.next)?;
-                modified_files.extend(files);
-            }
-            Ecosystem::Go | Ecosystem::Swift => {
-                debug!(%self.detection.ecosystem, "version lives in git tags, no file to bump");
-            }
-            Ecosystem::Php => {
-                let files = php::bump_composer_version(project_root, &self.next)?;
-                if files.is_empty() {
-                    debug!("composer.json has no version field, skipping");
-                }
-                modified_files.extend(files);
-            }
-            Ecosystem::Python => {
-                let files = python::bump_pyproject_version(project_root, &self.next)?;
-                if files.is_empty() {
-                    debug!("pyproject.toml has no version field, skipping");
-                }
-                modified_files.extend(files);
-            }
-            Ecosystem::Ruby => {
-                let files = ruby::bump_ruby_version(project_root, &self.next)?;
-                if files.is_empty() && self.version_files.is_empty() {
-                    return Err(BumpError::ToolFailed {
-                        tool: "ruby".into(),
-                        message: "no lib/**/version.rb or gemspec with a literal version \
-                                  was found, and no `[[version_files]]` entries are \
-                                  configured — the release would be tagged without \
-                                  updating any file"
-                            .into(),
-                    });
-                }
-                modified_files.extend(files);
-            }
-            Ecosystem::Generic => {
-                debug!("generic ecosystem — no project files to bump");
-            }
+        // Dispatch ecosystem-specific version file rewrite through the driver.
+        // Every driver accepts (project_root, version, detection); only Rust
+        // reads detection (for bump_cmd). Go, Swift, Generic return empty Vec.
+        let ecosystem_files = self.detection.ecosystem.driver().bump_version_files(
+            project_root,
+            &self.next,
+            &self.detection,
+        )?;
+
+        // Ruby-specific post-dispatch release-correctness check: if the driver
+        // found nothing AND there are no [[version_files]] configured, the
+        // release would tag without updating any file. Block it. This is a
+        // caller-layer rule, not a driver concern — the driver itself does
+        // not have visibility into [[version_files]] config.
+        if self.detection.ecosystem == Ecosystem::Ruby
+            && ecosystem_files.is_empty()
+            && self.version_files.is_empty()
+        {
+            return Err(BumpError::ToolFailed {
+                tool: "ruby".into(),
+                message: "no lib/**/version.rb or gemspec with a literal version \
+                          was found, and no `[[version_files]]` entries are \
+                          configured — the release would be tagged without \
+                          updating any file"
+                    .into(),
+            });
         }
+
+        modified_files.extend(ecosystem_files);
 
         // Update configured version files
         if !self.version_files.is_empty() {

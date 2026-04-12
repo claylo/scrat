@@ -9,7 +9,7 @@
 //! - [`config`] - Configuration loading and management
 //! - [`deps`] - Dependency diff from lockfile changes
 //! - [`detect`] - Project ecosystem and tool detection
-//! - [`ecosystem`] - Ecosystem types and smart defaults
+//! - [`ecosystem`] - Ecosystem types, drivers, and the [`EcosystemDriver`](ecosystem::EcosystemDriver) trait
 //! - [`error`] - Error types and result aliases
 //! - [`git`] - Git operations for release workflows
 //! - [`hooks`] - Hook executor for shell commands at phase boundaries

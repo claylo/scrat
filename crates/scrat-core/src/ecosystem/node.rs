@@ -1,22 +1,126 @@
-//! Lockfile diff parser for Node's `package-lock.json`.
+//! Node ecosystem driver (`package.json` / `package-lock.json`).
 //!
-//! Targets npm lockfile version 2 and 3, which use the `packages` key
-//! with paths like `"node_modules/<name>": { "version": "..." }`. Only
-//! top-level packages are reported — nested entries like
-//! `"node_modules/foo/node_modules/bar"` are intentionally skipped so
-//! release notes focus on direct dependency changes.
+//! `parse_lockfile_diff` reports **top-level dependencies only** —
+//! this is intentional. npm lockfile v2/v3 carries thousands of
+//! transitive entries; release notes want direct deps. The parser
+//! walks top-level `packages` entries via a JSON state machine and
+//! ignores nested `node_modules/*` subpackages. This is NOT a stub
+//! or partial implementation; it is the design.
 //!
 //! Scoped packages (`"node_modules/@scope/name"`) are preserved as
 //! `@scope/name`.
 
-use super::{LockfileDiffParser, emit_change};
+use camino::Utf8Path;
+use semver::Version;
+use tracing::debug;
+
+use super::{EcosystemDriver, emit_change};
+use crate::bump::{BumpError, BumpResult};
+use crate::detect::has_binary;
+use crate::ecosystem::{DetectedTools, Ecosystem, ProjectDetection, VersionStrategy};
 use crate::pipeline::DepChange;
+use crate::preflight::CheckResult;
 
-/// Lockfile diff parser for Node's `package-lock.json`.
-pub struct NodeLockfileParser;
+/// Node ecosystem driver.
+pub struct NodeDriver;
 
-impl LockfileDiffParser for NodeLockfileParser {
-    fn parse_diff(&self, diff: &str) -> Vec<DepChange> {
+impl EcosystemDriver for NodeDriver {
+    fn bump_version_files(
+        &self,
+        project_root: &Utf8Path,
+        version: &Version,
+        _detection: &ProjectDetection,
+    ) -> BumpResult<Vec<String>> {
+        let package_path = project_root.join("package.json");
+        let content =
+            std::fs::read_to_string(&package_path).map_err(|e| BumpError::ToolFailed {
+                tool: "package.json".into(),
+                message: format!("failed to read: {e}"),
+            })?;
+
+        let mut parsed: serde_json::Value =
+            serde_json::from_str(&content).map_err(|e| BumpError::ToolFailed {
+                tool: "package.json".into(),
+                message: format!("failed to parse: {e}"),
+            })?;
+
+        if parsed.get("version").and_then(|v| v.as_str()).is_none() {
+            return Err(BumpError::ToolFailed {
+                tool: "package.json".into(),
+                message: "no `version` field found — cannot bump".into(),
+            });
+        }
+
+        parsed["version"] = serde_json::Value::String(version.to_string());
+
+        // npm convention: 2-space indent, trailing newline
+        let output = serde_json::to_string_pretty(&parsed).map_err(|e| BumpError::ToolFailed {
+            tool: "package.json".into(),
+            message: format!("failed to serialize: {e}"),
+        })?;
+
+        std::fs::write(&package_path, format!("{output}\n")).map_err(|e| {
+            BumpError::ToolFailed {
+                tool: "package.json".into(),
+                message: format!("failed to write: {e}"),
+            }
+        })?;
+
+        debug!(%version, "bumped package.json version");
+        Ok(vec!["package.json".into()])
+    }
+
+    fn detect(
+        &self,
+        _project_root: &Utf8Path,
+        version_strategy: VersionStrategy,
+    ) -> ProjectDetection {
+        let has_npm = has_binary("npm");
+        let has_yarn = has_binary("yarn");
+        let has_pnpm = has_binary("pnpm");
+        debug!(has_npm, has_yarn, has_pnpm, "probed Node tools");
+
+        let (test_cmd, build_cmd, publish_cmd) = if has_pnpm {
+            (
+                "pnpm test".to_string(),
+                "pnpm run build".to_string(),
+                Some("pnpm publish".to_string()),
+            )
+        } else if has_yarn {
+            (
+                "yarn test".to_string(),
+                "yarn build".to_string(),
+                Some("yarn publish".to_string()),
+            )
+        } else {
+            (
+                "npm test".to_string(),
+                "npm run build".to_string(),
+                has_npm.then(|| "npm publish".to_string()),
+            )
+        };
+
+        let changelog_tool = version_strategy.changelog_tool();
+
+        ProjectDetection {
+            ecosystem: Ecosystem::Node,
+            version_strategy,
+            tools: DetectedTools {
+                test_cmd,
+                build_cmd,
+                publish_cmd,
+                bump_cmd: None, // handled via direct package.json edit
+                changelog_tool,
+            },
+        }
+    }
+
+    fn check_registry_auth(&self) -> CheckResult {
+        let env_vars = ["NPM_TOKEN", "NODE_AUTH_TOKEN"];
+        super::check_registry_auth_impl(&env_vars, "npm", "set NPM_TOKEN or run `npm login`")
+    }
+
+    fn parse_lockfile_diff(&self, diff: &str) -> Vec<DepChange> {
         let mut changes: Vec<DepChange> = Vec::new();
 
         let mut current_name: Option<String> = None;
@@ -65,10 +169,10 @@ impl LockfileDiffParser for NodeLockfileParser {
                     (_, true) => new_version = Some(version),
                     // Context lines (unchanged) seed both `old_version` and
                     // `new_version` with the same value. The deliberate
-                    // equality is caught by `emit_change` at
-                    // `deps/mod.rs:127-129`, which suppresses entries with
-                    // equal from/to — so blocks where only a non-version
-                    // field (e.g., `resolved`) moved correctly emit nothing.
+                    // equality is caught by `emit_change` which suppresses
+                    // entries with equal from/to — so blocks where only a
+                    // non-version field (e.g., `resolved`) moved correctly
+                    // emit nothing.
                     _ => {
                         if old_version.is_none() {
                             old_version = Some(version.clone());
@@ -122,7 +226,7 @@ fn extract_json_version(line: &str) -> Option<String> {
 mod tests {
     use super::*;
 
-    // ── NodeLockfileParser.parse_diff ──────────────────────────────
+    // ── NodeDriver.parse_lockfile_diff ──────────────────────────────
 
     #[test]
     fn parse_package_lock_diff_version_update() {
@@ -135,7 +239,7 @@ mod tests {
        "integrity": "sha512-..."
      },
 "#;
-        let changes = NodeLockfileParser.parse_diff(diff);
+        let changes = NodeDriver.parse_lockfile_diff(diff);
         assert_eq!(changes.len(), 1);
         assert_eq!(changes[0].name, "express");
         assert_eq!(changes[0].from.as_deref(), Some("4.17.1"));
@@ -151,7 +255,7 @@ mod tests {
 +      "license": "MIT"
 +    },
 "#;
-        let changes = NodeLockfileParser.parse_diff(diff);
+        let changes = NodeDriver.parse_lockfile_diff(diff);
         assert_eq!(changes.len(), 1);
         assert_eq!(changes[0].name, "chalk");
         assert_eq!(changes[0].from, None);
@@ -167,7 +271,7 @@ mod tests {
 -      "license": "MIT"
 -    },
 "#;
-        let changes = NodeLockfileParser.parse_diff(diff);
+        let changes = NodeDriver.parse_lockfile_diff(diff);
         assert_eq!(changes.len(), 1);
         assert_eq!(changes[0].name, "lodash");
         assert_eq!(changes[0].from.as_deref(), Some("4.17.21"));
@@ -183,7 +287,7 @@ mod tests {
        "resolved": "https://registry.npmjs.org/@babel/core/-/core-7.23.0.tgz"
      },
 "#;
-        let changes = NodeLockfileParser.parse_diff(diff);
+        let changes = NodeDriver.parse_lockfile_diff(diff);
         assert_eq!(changes.len(), 1);
         assert_eq!(changes[0].name, "@babel/core");
         assert_eq!(changes[0].from.as_deref(), Some("7.22.5"));
@@ -200,7 +304,7 @@ mod tests {
 +      "version": "2.6.9"
      },
 "#;
-        let changes = NodeLockfileParser.parse_diff(diff);
+        let changes = NodeDriver.parse_lockfile_diff(diff);
         assert!(changes.is_empty(), "nested entries should be skipped");
     }
 
@@ -219,7 +323,7 @@ mod tests {
 -      "version": "4.17.21"
 -    },
 "#;
-        let changes = NodeLockfileParser.parse_diff(diff);
+        let changes = NodeDriver.parse_lockfile_diff(diff);
         assert_eq!(changes.len(), 3);
         // Sorted alphabetically
         assert_eq!(changes[0].name, "chalk");
@@ -229,7 +333,7 @@ mod tests {
 
     #[test]
     fn parse_package_lock_diff_empty_diff() {
-        assert!(NodeLockfileParser.parse_diff("").is_empty());
+        assert!(NodeDriver.parse_lockfile_diff("").is_empty());
     }
 
     #[test]
@@ -242,7 +346,7 @@ mod tests {
 -      "version": "4.17.1",
 +      "version": "4.18.2"
      }"#;
-        let changes = NodeLockfileParser.parse_diff(diff);
+        let changes = NodeDriver.parse_lockfile_diff(diff);
         assert_eq!(changes.len(), 1);
         assert_eq!(changes[0].name, "express");
     }
@@ -257,7 +361,7 @@ mod tests {
 +      "resolved": "https://new-registry/..."
      },
 "#;
-        let changes = NodeLockfileParser.parse_diff(diff);
+        let changes = NodeDriver.parse_lockfile_diff(diff);
         assert!(
             changes.is_empty(),
             "only version changes should be reported"
@@ -320,5 +424,15 @@ mod tests {
     fn extract_json_version_no_match() {
         assert_eq!(extract_json_version("\"name\": \"foo\""), None);
         assert_eq!(extract_json_version("\"resolved\": \"http://\""), None);
+    }
+
+    #[test]
+    fn check_registry_auth_node() {
+        let result = NodeDriver.check_registry_auth();
+        assert_eq!(result.name, "Registry auth");
+        if !result.passed {
+            assert!(result.message.contains("NPM_TOKEN"));
+            assert_eq!(result.skip_flag.as_deref(), Some("--no-publish"));
+        }
     }
 }
