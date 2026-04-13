@@ -238,6 +238,10 @@ pub struct ReadyShip {
     pub config: Config,
     /// Detected project info.
     pub detection: ProjectDetection,
+    /// Current git branch resolved during preflight so [`ReadyShip::execute`]
+    /// doesn't re-invoke `git rev-parse --abbrev-ref HEAD`. `None` means
+    /// detached HEAD or the branch could not be resolved.
+    pub branch: Option<String>,
 }
 
 /// A ship that needs user input for version selection.
@@ -249,6 +253,9 @@ pub struct InteractiveShip {
     pub options: ShipOptions,
     /// Loaded configuration.
     pub config: Config,
+    /// Current git branch resolved during preflight (see
+    /// [`ReadyShip::branch`]).
+    pub branch: Option<String>,
 }
 
 /// Ecosystem auto-detection failed — the CLI must prompt the user.
@@ -338,6 +345,7 @@ pub fn plan_ship(
                 options,
                 config: config.clone(),
                 detection,
+                branch: report.branch,
             }))
         }
         bump::BumpPlan::NeedsInteraction(interactive_bump) => {
@@ -345,6 +353,7 @@ pub fn plan_ship(
                 bump: interactive_bump,
                 options,
                 config: config.clone(),
+                branch: report.branch,
             }))
         }
     }
@@ -378,6 +387,7 @@ pub fn resolve_ship_interaction(plan: InteractiveShip, chosen_version: Version) 
         options: plan.options,
         config: plan.config,
         detection,
+        branch: plan.branch,
     }
 }
 
@@ -445,7 +455,7 @@ impl ReadyShip {
             owner,
             repo,
             repo_url,
-            branch: git::current_branch().ok().flatten(),
+            branch: self.branch.clone(),
             ecosystem: self.detection.ecosystem.to_string(),
             changelog_path: project_root.join("CHANGELOG.md").to_string(),
             dry_run: is_dry,
@@ -2164,6 +2174,7 @@ mod tests {
             options: ShipOptions::default(),
             config: Config::default(),
             detection: test_detection_rust(),
+            branch: None,
         };
         assert_eq!(ready.bump.next, Version::new(1, 1, 0));
         assert_eq!(ready.bump.previous, Version::new(1, 0, 0));
@@ -2188,6 +2199,7 @@ mod tests {
             options: ShipOptions::default(),
             config: Config::default(),
             detection: test_detection_rust(),
+            branch: None,
         };
         let failures = ready.validate();
         assert!(
@@ -2213,6 +2225,7 @@ mod tests {
             },
             config: Config::default(),
             detection: test_detection_rust(),
+            branch: None,
         };
         let failures = ready.validate();
         assert!(
@@ -2238,6 +2251,7 @@ mod tests {
             },
             config: Config::default(),
             detection: test_detection_rust(),
+            branch: None,
         };
         let failures = ready.validate();
         assert!(
@@ -2267,6 +2281,7 @@ mod tests {
                 ..Default::default()
             },
             config: Config::default(),
+            branch: None,
         };
         assert!(ship.options.dry_run);
         assert_eq!(
@@ -2316,6 +2331,7 @@ mod tests {
                 ..Default::default()
             },
             config: Config::default(),
+            branch: None,
         };
         let chosen = Version::new(2, 0, 0);
         let ready = resolve_ship_interaction(interactive, chosen);
@@ -2340,6 +2356,7 @@ mod tests {
             },
             options: ShipOptions::default(),
             config: Config::default(),
+            branch: None,
         };
         let ready = resolve_ship_interaction(interactive, Version::new(0, 1, 0));
         assert_eq!(ready.bump.previous, Version::new(0, 0, 0));
@@ -2372,6 +2389,7 @@ mod tests {
             },
             options: ShipOptions::default(),
             config,
+            branch: None,
         };
         let ready = resolve_ship_interaction(interactive, Version::new(1, 1, 0));
         assert_eq!(ready.config.release.as_ref().unwrap().draft, Some(false));

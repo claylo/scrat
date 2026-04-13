@@ -17,7 +17,9 @@
 //! }
 //! ```
 
+use std::collections::HashMap;
 use std::process::Command;
+use std::sync::{Mutex, OnceLock};
 
 use camino::Utf8Path;
 use tracing::{debug, instrument};
@@ -128,9 +130,36 @@ fn build_detection_for(
     ecosystem.driver().detect(project_root, version_strategy)
 }
 
+/// Process-lifetime cache of `has_binary` results.
+///
+/// A single `scrat ship` probes the same set of binaries (git-cliff, cargo,
+/// cargo-nextest, cargo-set-version, gh) across detection, preflight, and
+/// version planning. Each `which::which` walks PATH — ~1-2ms on macOS, ~10-15ms
+/// aggregate per ship. Binaries cannot appear or disappear during a single
+/// process, so the probe is idempotent and safe to memoize.
+static PATH_CACHE: OnceLock<Mutex<HashMap<String, bool>>> = OnceLock::new();
+
 /// Check whether a binary is available on `PATH`.
+///
+/// Memoized for the lifetime of the process. Call [`clear_path_cache`] from
+/// tests that install a binary mid-run and need to re-probe.
 pub fn has_binary(name: &str) -> bool {
-    which::which(name).is_ok()
+    let cache = PATH_CACHE.get_or_init(|| Mutex::new(HashMap::new()));
+    if let Some(&cached) = cache.lock().unwrap().get(name) {
+        return cached;
+    }
+    let found = which::which(name).is_ok();
+    cache.lock().unwrap().insert(name.to_owned(), found);
+    found
+}
+
+/// Clear the [`has_binary`] PATH cache. Test-only escape hatch for scenarios
+/// that install or uninstall a binary during a test run.
+#[cfg(test)]
+pub fn clear_path_cache() {
+    if let Some(cache) = PATH_CACHE.get() {
+        cache.lock().unwrap().clear();
+    }
 }
 
 /// Minimum required version of git-cliff.

@@ -36,6 +36,12 @@ pub struct PreflightReport {
     pub all_passed: bool,
     /// Detected project info (if detection succeeded).
     pub detection: Option<ProjectDetection>,
+    /// Current git branch resolved once during preflight so downstream
+    /// pipeline phases (e.g., ship execute) don't re-invoke
+    /// `git rev-parse --abbrev-ref HEAD`. `None` means detached HEAD or
+    /// not in a git repo.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub branch: Option<String>,
 }
 
 /// Run all preflight checks.
@@ -80,18 +86,26 @@ pub fn run_preflight_with_detection(
             all_passed: false,
             detection: None,
             checks,
+            branch: None,
         };
     }
 
     // Check 2: Working tree clean
     checks.push(check_clean_tree());
 
+    // Resolve current branch once — fed into the release-branch check AND
+    // stashed on the report so later pipeline phases don't re-fork git.
+    let current_branch = git::current_branch().ok().flatten();
+
     // Check 3: On release branch
     let release_branch_override = config
         .project
         .as_ref()
         .and_then(|p| p.release_branch.as_deref());
-    checks.push(check_release_branch(release_branch_override));
+    checks.push(check_release_branch(
+        current_branch.as_deref(),
+        release_branch_override,
+    ));
 
     // Check 4: Remote in sync (honor --no-fetch to skip the network round-trip)
     let fetch_remote = !ship_options.is_some_and(|o| o.no_fetch);
@@ -136,6 +150,7 @@ pub fn run_preflight_with_detection(
         checks,
         all_passed,
         detection,
+        branch: current_branch,
     }
 }
 
@@ -185,22 +200,17 @@ fn check_clean_tree() -> CheckResult {
     }
 }
 
-fn check_release_branch(override_branch: Option<&str>) -> CheckResult {
-    let current = match git::current_branch() {
-        Ok(Some(b)) => b,
-        Ok(None) => {
+fn check_release_branch(
+    current_branch: Option<&str>,
+    override_branch: Option<&str>,
+) -> CheckResult {
+    let current = match current_branch {
+        Some(b) => b,
+        None => {
             return CheckResult {
                 name: "Release branch".into(),
                 passed: false,
                 message: "Detached HEAD — not on any branch".into(),
-                skip_flag: None,
-            };
-        }
-        Err(e) => {
-            return CheckResult {
-                name: "Release branch".into(),
-                passed: false,
-                message: format!("Failed to check: {e}"),
                 skip_flag: None,
             };
         }
@@ -655,6 +665,7 @@ mod tests {
             }],
             all_passed: true,
             detection: None,
+            branch: None,
         };
         let json = serde_json::to_string(&report).unwrap();
         assert!(json.contains("\"all_passed\":true"));
@@ -672,6 +683,7 @@ mod tests {
             }],
             all_passed: true,
             detection: Some(det),
+            branch: None,
         };
         let json = serde_json::to_string(&report).unwrap();
         assert!(json.contains("\"ecosystem\":\"rust\""));
@@ -685,6 +697,7 @@ mod tests {
             checks: vec![],
             all_passed: true,
             detection: Some(det),
+            branch: None,
         };
         let json = serde_json::to_string(&report).unwrap();
         assert!(json.contains("\"ecosystem\":\"generic\""));
@@ -697,6 +710,7 @@ mod tests {
             checks: vec![],
             all_passed: true,
             detection: Some(det),
+            branch: None,
         };
         let json = serde_json::to_string(&report).unwrap();
         assert!(json.contains("\"ecosystem\":\"node\""));
@@ -708,6 +722,7 @@ mod tests {
             checks: vec![],
             all_passed: true,
             detection: None,
+            branch: None,
         };
         assert!(report.all_passed);
         assert!(report.checks.is_empty());
@@ -732,6 +747,7 @@ mod tests {
             ],
             all_passed: false,
             detection: None,
+            branch: None,
         };
         assert!(!report.all_passed);
     }
@@ -761,6 +777,7 @@ mod tests {
             ],
             all_passed: false,
             detection: None,
+            branch: None,
         };
         let json = serde_json::to_string(&report).unwrap();
         let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
@@ -779,6 +796,7 @@ mod tests {
             }],
             all_passed: true,
             detection: Some(detection_for(Ecosystem::Rust)),
+            branch: None,
         };
         let cloned = report.clone();
         assert_eq!(cloned.all_passed, report.all_passed);
@@ -957,7 +975,8 @@ mod tests {
     fn check_release_branch_no_override() {
         // Runs in the scrat repo — we're probably not on main, so it
         // may pass or fail, but should not panic.
-        let result = check_release_branch(None);
+        let current = git::current_branch().ok().flatten();
+        let result = check_release_branch(current.as_deref(), None);
         assert_eq!(result.name, "Release branch");
         assert!(!result.message.is_empty());
     }
@@ -966,7 +985,7 @@ mod tests {
     fn check_release_branch_with_override_matching() {
         // Get the current branch and use it as the override — should pass.
         if let Ok(Some(branch)) = git::current_branch() {
-            let result = check_release_branch(Some(&branch));
+            let result = check_release_branch(Some(&branch), Some(&branch));
             assert!(result.passed);
             assert!(result.message.contains(&branch));
             assert!(result.message.contains("configured release branch"));
@@ -976,9 +995,10 @@ mod tests {
     #[test]
     fn check_release_branch_with_override_not_matching() {
         // Use a branch name that definitely doesn't match current branch.
-        // In CI (detached HEAD), the message will be about detached HEAD
-        // rather than a branch mismatch — either way, it should fail.
-        let result = check_release_branch(Some("this-branch-does-not-exist-xyz"));
+        // Simulate detached HEAD by passing None; otherwise use the real branch.
+        let current = git::current_branch().ok().flatten();
+        let result =
+            check_release_branch(current.as_deref(), Some("this-branch-does-not-exist-xyz"));
         assert!(!result.passed);
         assert!(
             result.message.contains("expected") || result.message.contains("Detached HEAD"),
@@ -1316,6 +1336,7 @@ mod tests {
             ],
             all_passed: false,
             detection: Some(detection_for(Ecosystem::Rust)),
+            branch: None,
         };
 
         let json = serde_json::to_string_pretty(&report).unwrap();
@@ -1335,6 +1356,7 @@ mod tests {
             checks: vec![],
             all_passed: true,
             detection: None,
+            branch: None,
         };
         let json = serde_json::to_string(&report).unwrap();
         let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
@@ -1530,6 +1552,7 @@ mod tests {
             checks: vec![],
             all_passed: true,
             detection: Some(det),
+            branch: None,
         };
         let json = serde_json::to_string(&report).unwrap();
         assert!(json.contains("conventional-commits"));
