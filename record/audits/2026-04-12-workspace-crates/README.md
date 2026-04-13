@@ -859,7 +859,7 @@ disposition details.
 | ✅ | [notes-error-flattens-source-chain](#notes-error-flattens-source-chain) | moderate | `crates/scrat-core/src/notes.rs:22-41` | medium | — |
 | ⏳ | [observability-returns-anyhow-in-library](#observability-returns-anyhow-in-library) | moderate | `crates/scrat-core/src/observability.rs:67-70` | small | — |
 | ⏳ | [observability-writer-silent-discard](#observability-writer-silent-discard) | advisory | `crates/scrat-core/src/observability.rs:196-202` | trivial | — |
-| ⏳ | [expect-messages-describe-value-not-invariant](#expect-messages-describe-value-not-invariant) | advisory | `crates/scrat/src/commands/doctor.rs:112-116` | trivial | — |
+| ✅ | [expect-messages-describe-value-not-invariant](#expect-messages-describe-value-not-invariant) | advisory | `crates/scrat/src/commands/doctor.rs:112-116` | trivial | — |
 | | **The Supply Chain Surface** | | | | |
 | ⏳ | [scrat-core-depends-on-clap-for-value-enum-derives](#scrat-core-depends-on-clap-for-value-enum-derives) | moderate | `crates/scrat-core/Cargo.toml:33` | small | — |
 | ✅ | [serde-saphyr-caret-on-zero-zero-x](#serde-saphyr-caret-on-zero-zero-x) | advisory | `crates/scrat-core/Cargo.toml:36` | trivial | — |

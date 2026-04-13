@@ -109,11 +109,14 @@ pub fn cmd_doctor(
 ) -> anyhow::Result<()> {
     debug!(json_output = global_json, "executing doctor command");
     let spinner = ProgressBar::new_spinner();
-    spinner.set_style(
-        ProgressStyle::default_spinner()
-            .template("{spinner:.cyan} {msg}")
-            .expect("valid template"),
-    );
+    // The literal template appears in the expect message so a crash report
+    // names the specific input indicatif rejected. The `{...}` segments are
+    // not format args; they are indicatif's spinner syntax.
+    #[allow(clippy::literal_string_with_formatting_args)]
+    let spinner_style = ProgressStyle::default_spinner()
+        .template("{spinner:.cyan} {msg}")
+        .expect("indicatif must accept literal template '{spinner:.cyan} {msg}'");
+    spinner.set_style(spinner_style);
     spinner.set_message("Gathering diagnostics...");
     spinner.enable_steady_tick(std::time::Duration::from_millis(80));
 

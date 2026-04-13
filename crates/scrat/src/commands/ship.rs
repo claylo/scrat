@@ -253,11 +253,14 @@ fn handle_event(event: ShipEvent, is_dry: bool) {
     match event {
         ShipEvent::PhaseStarted(phase) => {
             let spinner = ProgressBar::new_spinner();
-            spinner.set_style(
-                ProgressStyle::with_template("  {spinner:.cyan} {msg}")
-                    .expect("valid spinner template")
-                    .tick_strings(&["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"]),
-            );
+            // The literal template appears in the expect message so a crash
+            // report names the specific input indicatif rejected. The `{...}`
+            // segments are indicatif's spinner syntax, not format args.
+            #[allow(clippy::literal_string_with_formatting_args)]
+            let spinner_style = ProgressStyle::with_template("  {spinner:.cyan} {msg}")
+                .expect("indicatif must accept literal template '  {spinner:.cyan} {msg}'")
+                .tick_strings(&["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"]);
+            spinner.set_style(spinner_style);
             spinner.set_message(format!("{phase}..."));
             // For now we finish immediately since phases are synchronous.
             // The spinner shows briefly to indicate activity.

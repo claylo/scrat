@@ -532,3 +532,48 @@ this PR. The disposition history is now: D #1 closes NotesError, D #2
 closes BumpError, slug fully resolved.
 
 ---
+
+## 2026-04-13 — expect() messages carry the literal template
+
+**Disposition:** fixed
+**Addresses:**
+[expect-messages-describe-value-not-invariant](README.md#expect-messages-describe-value-not-invariant) (advisory)
+**Commit:** _(see PR linked from front matter once merged)_
+**Author:** @claylo
+
+Two sites — `commands/doctor.rs` and `commands/ship.rs` — constructed
+`ProgressStyle` via `.expect("valid template")` / `.expect("valid
+spinner template")`. The messages paraphrased the value rather than
+stating the invariant. If indicatif ever rejects the literal (typo
+during edit or breaking-change release), a crash report would show the
+paraphrase and nothing actionable.
+
+Replaced both with the audit's recommended form, embedding the
+indicatif template literal so a panic message names the specific
+input:
+
+- `doctor.rs:115`: `.expect("indicatif must accept literal template '{spinner:.cyan} {msg}'")`
+- `ship.rs:258`:   `.expect("indicatif must accept literal template '  {spinner:.cyan} {msg}'")`
+  (two-space prefix preserved — ship-phase spinners indent under the
+  phase header)
+
+### Clippy friction
+
+The `{spinner:.cyan}` pattern inside `.expect()` triggers the nursery
+lint `clippy::literal_string_with_formatting_args`
+("this looks like a formatting argument but it is not part of a
+formatting macro"). The braces are intentional — they name indicatif's
+spinner-syntax tokens. Attribute placement for the `#[allow]`:
+expression-position attributes on method calls aren't stable, so the
+ProgressStyle construction was hoisted to its own `let` binding and
+`#[allow(clippy::literal_string_with_formatting_args)]` sits on the
+statement. Comment above each site documents the intent so a future
+maintainer sees why the lint is suppressed.
+
+### Verification
+
+- `just test`: 600/600 passed (no behavioral change, no new tests)
+- `just clippy`: 0 warnings
+- `cargo fmt --all --check`: clean
+
+---
