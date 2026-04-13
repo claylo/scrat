@@ -552,7 +552,7 @@ assets = ["dist/release-card.png"]
 ### Crate Organization
 
 - **scrat** - The CLI binary. Handles argument parsing, command dispatch, and user interaction.
-- **scrat-core** - The core library. Contains configuration loading, error types, and shared functionality.
+- **scrat-core** - The core library. Contains configuration loading, error types, and shared functionality. Library consumers get zero clap dependency by default — clap is gated behind an opt-in `cli` feature that adds `clap::ValueEnum` derives to public enums (`ConfigFormat`, `ConfigStyle`). The `scrat` binary enables the feature automatically; embed `scrat-core` without it to skip clap and its transitive crates entirely.
 
 
 ## Installation

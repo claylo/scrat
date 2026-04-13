@@ -28,7 +28,8 @@ pub struct InitPlan {
 }
 
 /// Output format for the generated config file.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, clap::ValueEnum)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize)]
+#[cfg_attr(feature = "cli", derive(clap::ValueEnum))]
 pub enum ConfigFormat {
     /// TOML format (default).
     #[default]
@@ -38,7 +39,8 @@ pub enum ConfigFormat {
 }
 
 /// How much commentary to include in the generated config.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, clap::ValueEnum)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize)]
+#[cfg_attr(feature = "cli", derive(clap::ValueEnum))]
 pub enum ConfigStyle {
     /// Full config with section dividers and commented-out defaults.
     #[default]
