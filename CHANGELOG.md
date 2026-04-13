@@ -1,9 +1,48 @@
+## [0.1.3] - 2026-04-13
+
+### 🐛 Bug Fixes
+
+- *(cli)* Isolate tests from real user config directory (#34)
+- Address 2026-04-09 audit findings + bump MSRV to 1.94.1 (#36)
+- *(notes)* Honor --from flag and run filter hooks in preview (#44)
+- *(notes)* Preserve source chain through NotesError variants (#48)
+- *(bump)* Preserve source chain through BumpError variants (#49)
+
+### 🚜 Refactor
+
+- *(detect)* Extract remaining per-ecosystem helpers to sibling files (#37)
+- *(bump)* Extract per-ecosystem version bump helpers into bump/ (#38)
+- *(deps)* Extract per-ecosystem lockfile diff parsers into deps/ (#40)
+- *(ecosystem)* Unify bump, deps, detect into ecosystem/ with EcosystemDriver trait (#43)
+
+### 📚 Documentation
+
+- Add version-files spec and implementation plan (#35)
+- Add Phase 3 plan for ecosystem-modules refactor (#39)
+- Add Phase 4 execution plan for ecosystem-modules refactor (#41)
+- Add Apr 12 cased audit
+
+### ⚡ Performance
+
+- *(pipeline)* Cache has_binary and thread branch through plan (#47)
+
+### ⚙️ Miscellaneous Tasks
+
+- Fix deployment for fault tolerance
+- *(audit)* Close Bundle A cleanup findings (#45)
+- *(audit)* Harden supply chain (Bundle B) (#46)
+- *(audit)* Expect() messages carry the literal indicatif template (#50)
+- *(audit)* Feature-gate clap in scrat-core behind cli feature (#51)
 ## [0.1.2] - 2026-04-05
 
 ### 🐛 Bug Fixes
 
 - *(notes)* Inject version into cliff context so notes render under the release tag (#32)
 - *(notes)* Only inject version when cliff context has none (#33)
+
+### ⚙️ Miscellaneous Tasks
+
+- Release 0.1.2
 ## [0.1.1] - 2026-04-05
 
 ### 🐛 Bug Fixes

@@ -6,7 +6,7 @@ resolver = "3"
 [workspace.package]
 edition = "2024"
 license = "Apache-2.0 OR MIT"
-version = "0.1.2"
+version = "0.1.3"
 # Match rust-toolchain.toml so the dev toolchain and the minimum
 # supported version are the same — eliminates "is feature X stable yet?"
 # guesswork.
