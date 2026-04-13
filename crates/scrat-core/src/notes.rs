@@ -23,13 +23,29 @@ use crate::{deps, detect, git, stats, version};
 /// Errors from the release notes rendering pipeline.
 #[derive(Error, Debug)]
 pub enum NotesError {
-    /// Failed to run `git-cliff --context` or parse its output.
+    /// `git-cliff --context` exited non-zero (stderr captured).
     #[error("git-cliff context extraction failed: {0}")]
     CliffContext(String),
 
-    /// Failed to run `git-cliff --from-context` to render notes.
+    /// `git-cliff --from-context` exited non-zero (stderr captured).
     #[error("git-cliff rendering failed: {0}")]
     CliffRender(String),
+
+    /// Failed to spawn or communicate with the `git-cliff` subprocess.
+    #[error("git-cliff subprocess error")]
+    CliffExec(#[from] std::io::Error),
+
+    /// Failed to parse or serialize the git-cliff context JSON.
+    #[error("git-cliff context JSON error")]
+    CliffJson(#[from] serde_json::Error),
+
+    /// A git operation failed while preparing notes (e.g. resolving the prior tag).
+    #[error("git operation failed")]
+    Git(#[from] crate::git::GitError),
+
+    /// A version parse failed while preparing notes.
+    #[error("version parse failed")]
+    Version(#[from] crate::version::VersionError),
 
     /// Failed to read a custom template file.
     #[error("failed to read template at {path}: {source}")]
@@ -105,9 +121,7 @@ pub fn preview_notes(
     // Resolve previous version tag
     let previous_tag = match options.from {
         Some(ref tag) => tag.clone(),
-        None => git::latest_version_tag()
-            .map_err(|e| NotesError::CliffContext(format!("failed to query git tags: {e}")))?
-            .unwrap_or_default(),
+        None => git::latest_version_tag()?.unwrap_or_default(),
     };
 
     // Parse previous version from tag
@@ -124,9 +138,7 @@ pub fn preview_notes(
     let current_version = match options.version {
         Some(ref v) => {
             let v_str = v.strip_prefix('v').unwrap_or(v);
-            version::parse_version(v_str)
-                .map(|v| v.to_string())
-                .map_err(|e| NotesError::CliffContext(format!("invalid version: {e}")))?
+            version::parse_version(v_str)?.to_string()
         }
         None => detect_current_version(project_root, &ecosystem_name)
             .unwrap_or_else(|| "unreleased".into()),
@@ -469,8 +481,7 @@ fn run_cliff_context(project_root: &Utf8Path, args: &[String]) -> Result<String,
     let output = Command::new("git-cliff")
         .args(args)
         .current_dir(project_root.as_std_path())
-        .output()
-        .map_err(|e| NotesError::CliffContext(format!("failed to execute git-cliff: {e}")))?;
+        .output()?;
 
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
@@ -494,8 +505,7 @@ fn run_cliff_context(project_root: &Utf8Path, args: &[String]) -> Result<String,
 ///
 /// The context is a JSON array of release objects. We inject into `[0].extra`.
 fn inject_extra(context_json: &str, ctx: &PipelineContext) -> Result<String, NotesError> {
-    let mut releases: serde_json::Value = serde_json::from_str(context_json)
-        .map_err(|e| NotesError::CliffContext(format!("failed to parse context JSON: {e}")))?;
+    let mut releases: serde_json::Value = serde_json::from_str(context_json)?;
 
     let arr = releases
         .as_array_mut()
@@ -522,8 +532,7 @@ fn inject_extra(context_json: &str, ctx: &PipelineContext) -> Result<String, Not
         release["version"] = serde_json::Value::String(ctx.version.clone());
     }
 
-    serde_json::to_string(&releases)
-        .map_err(|e| NotesError::CliffContext(format!("failed to re-serialize context: {e}")))
+    Ok(serde_json::to_string(&releases)?)
 }
 
 /// Run `git-cliff --from-context - --body <template>` with enriched JSON on stdin.
@@ -549,19 +558,14 @@ fn run_cliff_render(
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped())
         .current_dir(project_root.as_std_path())
-        .spawn()
-        .map_err(|e| NotesError::CliffRender(format!("failed to spawn git-cliff: {e}")))?;
+        .spawn()?;
 
     // Write the enriched JSON to stdin
     if let Some(mut stdin) = child.stdin.take() {
-        stdin
-            .write_all(enriched_json.as_bytes())
-            .map_err(|e| NotesError::CliffRender(format!("failed to write to stdin: {e}")))?;
+        stdin.write_all(enriched_json.as_bytes())?;
     }
 
-    let output = child
-        .wait_with_output()
-        .map_err(|e| NotesError::CliffRender(format!("failed to wait for git-cliff: {e}")))?;
+    let output = child.wait_with_output()?;
 
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
@@ -1041,25 +1045,31 @@ mod tests {
 
     #[test]
     fn inject_extra_errors_on_malformed_json() {
+        use std::error::Error;
         let ctx = test_ctx();
-        let result = inject_extra("this is not json", &ctx);
-        assert!(result.is_err());
-        let err_msg = result.unwrap_err().to_string();
+        let err = inject_extra("this is not json", &ctx).unwrap_err();
         assert!(
-            err_msg.contains("failed to parse context JSON"),
-            "unexpected error: {err_msg}"
+            matches!(err, NotesError::CliffJson(_)),
+            "expected CliffJson variant, got: {err:?}"
+        );
+        assert!(
+            err.source().is_some(),
+            "source chain should be preserved for serde_json errors"
         );
     }
 
     #[test]
     fn inject_extra_errors_on_truncated_json() {
+        use std::error::Error;
         let ctx = test_ctx();
-        let result = inject_extra("[{\"version\":", &ctx);
-        assert!(result.is_err());
-        let err_msg = result.unwrap_err().to_string();
+        let err = inject_extra("[{\"version\":", &ctx).unwrap_err();
         assert!(
-            err_msg.contains("failed to parse context JSON"),
-            "unexpected error: {err_msg}"
+            matches!(err, NotesError::CliffJson(_)),
+            "expected CliffJson variant, got: {err:?}"
+        );
+        assert!(
+            err.source().is_some(),
+            "source chain should be preserved for truncated JSON"
         );
     }
 
@@ -1452,6 +1462,51 @@ mod tests {
             msg.contains("failed to read template"),
             "error should describe what failed"
         );
+    }
+
+    // ──────────────────────────────────────────────
+    // NotesError: source() chain preservation
+    // ──────────────────────────────────────────────
+
+    #[test]
+    fn cliff_exec_preserves_io_source() {
+        use std::error::Error;
+        let io_err = std::io::Error::new(std::io::ErrorKind::NotFound, "git-cliff not on PATH");
+        let err: NotesError = io_err.into();
+        assert!(matches!(err, NotesError::CliffExec(_)));
+        let source = err.source().expect("CliffExec must expose its io::Error");
+        assert!(source.to_string().contains("git-cliff not on PATH"));
+    }
+
+    #[test]
+    fn cliff_json_preserves_serde_source() {
+        use std::error::Error;
+        let json_err = serde_json::from_str::<serde_json::Value>("not json").unwrap_err();
+        let err: NotesError = json_err.into();
+        assert!(matches!(err, NotesError::CliffJson(_)));
+        assert!(err.source().is_some(), "CliffJson must expose serde source");
+    }
+
+    #[test]
+    fn git_variant_preserves_git_source() {
+        use std::error::Error;
+        let git_err = crate::git::GitError::NotARepo;
+        let err: NotesError = git_err.into();
+        assert!(matches!(err, NotesError::Git(_)));
+        let source = err.source().expect("Git variant must expose its GitError");
+        assert!(source.to_string().contains("not a git repository"));
+    }
+
+    #[test]
+    fn version_variant_preserves_version_source() {
+        use std::error::Error;
+        let version_err = crate::version::VersionError::NoTags;
+        let err: NotesError = version_err.into();
+        assert!(matches!(err, NotesError::Version(_)));
+        let source = err
+            .source()
+            .expect("Version variant must expose its VersionError");
+        assert!(source.to_string().contains("no version tags"));
     }
 
     // ──────────────────────────────────────────────

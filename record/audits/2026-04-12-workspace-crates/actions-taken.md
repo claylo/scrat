@@ -283,3 +283,112 @@ unchanged, new field only appears when a branch is present).
   `ReadyShip`, `InteractiveShip`
 
 ---
+
+## 2026-04-13 — NotesError source-chain restoration (Bundle D #1)
+
+**Disposition:** fixed
+**Addresses:**
+[notes-error-flattens-source-chain](README.md#notes-error-flattens-source-chain) (moderate)
+**Commit:** _(see PR linked from front matter once merged)_
+**Author:** @claylo
+
+Fixed the partial remediation left behind by Bundle C (Notes hook seam).
+`NotesError::CliffContext(String)` and `CliffRender(String)` flattened four
+distinct sub-error types into opaque strings, so
+`err.chain().skip(1).for_each(...)` in `main.rs:15` printed nothing
+beyond the top line. Users lost the OS error code for missing-binary
+failures and the file/line context for malformed-JSON failures unless
+they re-ran with `-vv`.
+
+### Four new `#[from]` variants
+
+- `CliffExec(#[from] std::io::Error)` — covers the four subprocess sites
+  (`.output()`, `.spawn()`, `stdin.write_all()`, `.wait_with_output()`).
+- `CliffJson(#[from] serde_json::Error)` — covers the two context-JSON
+  sites (`from_str` for parse, `to_string` for re-serialize after
+  injecting scrat's `extra`).
+- `Git(#[from] crate::git::GitError)` — single site, `latest_version_tag()`
+  when `--from` is omitted.
+- `Version(#[from] crate::version::VersionError)` — single site,
+  `parse_version()` when `--version` is user-supplied.
+
+`CliffContext(String)` and `CliffRender(String)` are intentionally
+retained for the one case they still make semantic sense: git-cliff
+exited non-zero with stderr, and stderr itself is the primary
+diagnostic — there is no Rust-level wrapped error to preserve.
+
+### Sites refactored
+
+Eight call sites in `crates/scrat-core/src/notes.rs`:
+
+| Location | Before | After |
+|----------|--------|-------|
+| `preview_notes` — prev tag | `.map_err(\|e\| NotesError::CliffContext(format!("failed to query git tags: {e}")))?` | `?` |
+| `preview_notes` — version parse | `.map_err(\|e\| NotesError::CliffContext(format!("invalid version: {e}")))?` | `?` |
+| `run_cliff_context` — subprocess | `.map_err(\|e\| NotesError::CliffContext(format!("failed to execute git-cliff: {e}")))?` | `?` |
+| `inject_extra` — parse | `.map_err(\|e\| NotesError::CliffContext(format!("failed to parse context JSON: {e}")))?` | `?` |
+| `inject_extra` — reserialize | `.map_err(\|e\| NotesError::CliffContext(format!("failed to re-serialize context: {e}")))` | `Ok(...?)` |
+| `run_cliff_render` — spawn | `.map_err(\|e\| NotesError::CliffRender(format!("failed to spawn git-cliff: {e}")))?` | `?` |
+| `run_cliff_render` — stdin | `.map_err(\|e\| NotesError::CliffRender(format!("failed to write to stdin: {e}")))?` | `?` |
+| `run_cliff_render` — wait | `.map_err(\|e\| NotesError::CliffRender(format!("failed to wait for git-cliff: {e}")))?` | `?` |
+
+### Tests
+
+Four new source-chain tests verify the fix's guarantee:
+
+- `cliff_exec_preserves_io_source` — constructs via `io::Error::new`,
+  asserts `matches!(err, CliffExec(_))` and `err.source().is_some()`.
+- `cliff_json_preserves_serde_source` — same shape for
+  `serde_json::Error`.
+- `git_variant_preserves_git_source` — `GitError::NotARepo` → verifies
+  `source().to_string()` contains `"not a git repository"`.
+- `version_variant_preserves_version_source` — `VersionError::NoTags`
+  → verifies `source().to_string()` contains `"no version tags"`.
+
+Two existing tests (`inject_extra_errors_on_malformed_json`,
+`inject_extra_errors_on_truncated_json`) were updated from
+string-contains assertions on the old flattened message to
+`matches!(err, CliffJson(_))` + `source().is_some()` — the same
+observable behavior the upstream CLI relies on.
+
+### Before/after — end-to-end
+
+```
+$ scrat notes --version "not-a-version"
+# before: Error: git-cliff context extraction failed: invalid version: …
+# after:
+Error: failed to render release notes
+
+Caused by:
+    version parse failed
+
+Caused by:
+    invalid semver: unexpected character 'n' while parsing major version number
+
+Caused by:
+    unexpected character 'n' while parsing major version number
+```
+
+The anyhow context (`failed to render release notes`) wraps the scrat
+layer; each `Caused by` unwraps one more source frame. The user gets
+the semantic label at every level instead of one opaque sentence.
+
+### Verification
+
+- `just test`: 597/597 passed (4 new source-chain tests)
+- `just clippy`: 0 warnings
+- `cargo fmt --all --check`: clean
+- End-to-end smoke against `scrat` repo:
+  - `scrat notes --version "bad"` → Version chain (semver source)
+  - `PATH=/usr/bin scrat notes --version 0.1.3` → CliffExec chain
+    (io::Error "No such file or directory")
+  - tag-less repo → CliffContext(String) still (git-cliff non-zero, stderr
+    is the diagnostic — behavior preserved)
+
+### Deferred
+
+`BumpError::ToolFailed` is the mirror finding and ships separately in
+Bundle D #2 — ~20 call sites across `bump.rs` and `version_files.rs`,
+different blast radius.
+
+---

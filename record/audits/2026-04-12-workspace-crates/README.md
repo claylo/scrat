@@ -856,7 +856,7 @@ disposition details.
 | Status | Finding | Concern | Location | Effort | Chains |
 |--------|---------|---------|----------|--------|--------|
 | | **The Error Architecture Surface** | | | | |
-| ⏳ | [notes-error-flattens-source-chain](#notes-error-flattens-source-chain) | moderate | `crates/scrat-core/src/notes.rs:22-41` | medium | — |
+| ✅ | [notes-error-flattens-source-chain](#notes-error-flattens-source-chain) | moderate | `crates/scrat-core/src/notes.rs:22-41` | medium | — |
 | ⏳ | [observability-returns-anyhow-in-library](#observability-returns-anyhow-in-library) | moderate | `crates/scrat-core/src/observability.rs:67-70` | small | — |
 | ⏳ | [observability-writer-silent-discard](#observability-writer-silent-discard) | advisory | `crates/scrat-core/src/observability.rs:196-202` | trivial | — |
 | ⏳ | [expect-messages-describe-value-not-invariant](#expect-messages-describe-value-not-invariant) | advisory | `crates/scrat/src/commands/doctor.rs:112-116` | trivial | — |
