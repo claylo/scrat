@@ -246,7 +246,6 @@ publish = "cargo publish --no-verify"
 
 # Release settings
 [release]
-changelog_tool = "git-cliff"
 github_release = true
 assets = ["release-card.png", "checksums.txt"]
 

@@ -57,16 +57,13 @@ log_level = "info"
 
 # [commands]
 # test = "cargo nextest run"     # Rust default (if nextest installed)
-# build = "cargo build --release"
 # publish = "cargo publish"
-# clean = "cargo clean"
 
 # ------------------------------------------------------------------------------
 # Release Workflow
 # ------------------------------------------------------------------------------
 
 # [release]
-# changelog_tool = "git-cliff"
 # github_release = true
 # assets = ["release-card.png", "checksums.txt"]
 
@@ -86,6 +83,11 @@ log_level = "info"
 # Commands run in parallel by default. Prefix with "sync:" to create a
 # barrier — all prior commands finish, the sync command runs alone, then
 # subsequent commands resume in parallel.
+#
+# Prefix with "filter:" to run the command as a JSON filter over the pipeline
+# state — the command receives the current PipelineContext on stdin and must
+# return a JSON object on stdout that replaces it. Useful for injecting custom
+# metadata into release notes via jq one-liners. Implies a sync barrier.
 #
 # Phase order:
 #   pre_ship → test → bump → git → release → publish → post_ship

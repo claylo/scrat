@@ -39,7 +39,7 @@ use figment::providers::{Format, Json, Serialized, Toml};
 use serde::{Deserialize, Serialize};
 use serde_saphyr::figment::Yaml;
 
-use crate::ecosystem::{ChangelogTool, Ecosystem};
+use crate::ecosystem::Ecosystem;
 use crate::error::{ConfigError, ConfigResult};
 
 /// The configuration for scrat.
@@ -106,19 +106,13 @@ pub struct VersionConfig {
 pub struct CommandsConfig {
     /// Override the test command (e.g., `"cargo nextest run"`).
     pub test: Option<String>,
-    /// Override the build command (e.g., `"cargo build --release"`).
-    pub build: Option<String>,
     /// Override the publish command (e.g., `"cargo publish"`).
     pub publish: Option<String>,
-    /// Override the clean command.
-    pub clean: Option<String>,
 }
 
 /// Release workflow configuration.
 #[derive(Debug, Clone, Default, Deserialize, Serialize, PartialEq, Eq)]
 pub struct ReleaseConfig {
-    /// Override the changelog tool (currently only `"git-cliff"` is supported).
-    pub changelog_tool: Option<ChangelogTool>,
     /// Whether to create a GitHub release (default: `true`).
     pub github_release: Option<bool>,
     /// File paths to attach to the GitHub release as assets.
@@ -934,7 +928,7 @@ release_branch = "main"
             r#"
 [commands]
 test = "cargo nextest run"
-build = "cargo build --release"
+publish = "cargo publish --no-verify"
 "#,
         )
         .unwrap();
@@ -948,8 +942,10 @@ build = "cargo build --release"
 
         let commands = config.commands.unwrap();
         assert_eq!(commands.test.as_deref(), Some("cargo nextest run"));
-        assert_eq!(commands.build.as_deref(), Some("cargo build --release"));
-        assert!(commands.publish.is_none());
+        assert_eq!(
+            commands.publish.as_deref(),
+            Some("cargo publish --no-verify")
+        );
     }
 
     #[test]
@@ -960,7 +956,6 @@ build = "cargo build --release"
             &config_path,
             r#"
 [release]
-changelog_tool = "git-cliff"
 github_release = true
 assets = ["release-card.png", "checksums.txt"]
 "#,
@@ -975,10 +970,6 @@ assets = ["release-card.png", "checksums.txt"]
             .unwrap();
 
         let release = config.release.unwrap();
-        assert_eq!(
-            release.changelog_tool,
-            Some(crate::ecosystem::ChangelogTool::GitCliff)
-        );
         assert_eq!(release.github_release, Some(true));
         assert_eq!(
             release.assets,
@@ -1025,7 +1016,6 @@ discussion_category = "releases"
             &config_path,
             r#"
 [release]
-changelog_tool = "git-cliff"
 notes_template = "templates/my-notes.tera"
 "#,
         )

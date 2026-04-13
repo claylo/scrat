@@ -382,9 +382,7 @@ log_level = "info"
 [commands]
 # Override per-phase commands (default: auto-detected per ecosystem)
 # test = "just test"
-# build = "cargo build --release"
 # publish = "cargo publish"
-# clean = "cargo clean"
 
 [release]
 # Create GitHub releases (default: true)
