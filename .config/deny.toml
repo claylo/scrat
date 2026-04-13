@@ -50,6 +50,14 @@ unused-allowed-license = "allow"
 db-path = "~/.cargo/advisory-db"
 db-urls = ["https://github.com/RustSec/advisory-db"]
 
+# Fail CI on yanked crates and any unmaintained advisory (workspace or
+# transitive). cargo-deny's defaults are "warn"; denying here ensures a
+# maintainer yank at 2 AM doesn't silently keep shipping the pulled
+# artifact. Vulnerability advisories are always hard errors in
+# cargo-deny 0.14+ — no explicit key needed.
+yanked = "deny"
+unmaintained = "all"
+
 # Ignore specific advisories (use with caution in enterprise)
 ignore = [
 ]
@@ -70,6 +78,10 @@ deny = []
 # Skip duplicate version checks for commonly duplicated crates and
 # transitive dependencies we can't control
 skip = [
+    # owo-colors 4.3's "supports-colors" feature pulls both supports-color 3.0
+    # and supports-color 2.0 (via package rename) intentionally. Drowning
+    # signal otherwise; no dedup path without losing terminal auto-detect.
+    { name = "supports-color" },
 ]
 
 # ==============================================================================

@@ -862,9 +862,9 @@ disposition details.
 | ⏳ | [expect-messages-describe-value-not-invariant](#expect-messages-describe-value-not-invariant) | advisory | `crates/scrat/src/commands/doctor.rs:112-116` | trivial | — |
 | | **The Supply Chain Surface** | | | | |
 | ⏳ | [scrat-core-depends-on-clap-for-value-enum-derives](#scrat-core-depends-on-clap-for-value-enum-derives) | moderate | `crates/scrat-core/Cargo.toml:33` | small | — |
-| ⏳ | [serde-saphyr-caret-on-zero-zero-x](#serde-saphyr-caret-on-zero-zero-x) | advisory | `crates/scrat-core/Cargo.toml:36` | trivial | — |
-| ⏳ | [ci-lacks-yanked-and-unmaintained-hardening](#ci-lacks-yanked-and-unmaintained-hardening) | advisory | `.config/deny.toml:48-55` | trivial | — |
-| ⏳ | [owo-colors-pulls-duplicate-supports-color](#owo-colors-pulls-duplicate-supports-color) | note | `crates/scrat/Cargo.toml:49` | trivial | related: [transitive-getrandom-triplicate](#transitive-getrandom-triplicate) |
+| ✅ | [serde-saphyr-caret-on-zero-zero-x](#serde-saphyr-caret-on-zero-zero-x) | advisory | `crates/scrat-core/Cargo.toml:36` | trivial | — |
+| ✅ | [ci-lacks-yanked-and-unmaintained-hardening](#ci-lacks-yanked-and-unmaintained-hardening) | advisory | `.config/deny.toml:48-55` | trivial | — |
+| ✅ | [owo-colors-pulls-duplicate-supports-color](#owo-colors-pulls-duplicate-supports-color) | note | `crates/scrat/Cargo.toml:49` | trivial | related: [transitive-getrandom-triplicate](#transitive-getrandom-triplicate) |
 | ⏳ | [transitive-getrandom-triplicate](#transitive-getrandom-triplicate) | note | `Cargo.lock:477-513` | small | related: [owo-colors-pulls-duplicate-supports-color](#owo-colors-pulls-duplicate-supports-color) |
 | | **The Pipeline Efficiency Surface** | | | | |
 | ⏳ | [redundant-git-current-branch-per-ship](#redundant-git-current-branch-per-ship) | advisory | `crates/scrat-core/src/preflight.rs:188-198` | small | related: [has-binary-path-probe-not-cached](#has-binary-path-probe-not-cached) |
