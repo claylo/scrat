@@ -1,0 +1,1067 @@
+---
+audit_date: 2026-04-12
+scope: "Full workspace audit — crates/scrat (CLI) and crates/scrat-core (library)"
+commit: 7b2f302a165bac8bd114ddee283d5d396da42e89
+assessment: |
+  scrat is a Rust release-automation CLI at 0.1.2, two months old, with 18,376 lines across two
+  workspace crates. The Phase 4 ecosystem-modules refactor landed yesterday (PR #43), moving each
+  ecosystem behind a single EcosystemDriver trait with real bump, deps, and detect behavior for
+  all seven supported languages. The foundation is unusually tight for an early-stage tool:
+  #![deny(unsafe_code)] at both crate roots, clippy clean with -D warnings, cargo-audit clean
+  across 189 dependencies, cargo-deny clean on advisories/licenses/sources, cargo-machete finds
+  zero unused deps, and the canonical ownership/lifetime/trait-design surface is clean against
+  the crustoleum rubric.
+
+  The audit landed at 19 findings — zero critical, one significant, three moderate, nine
+  advisory, and six notes. Most of the 2026-04-09 audit's higher-severity items have been
+  resolved by the refactor: ecosystem detection is now deduped in plan_ship, PipelineContext is
+  serialized only when a filter: hook is actually present, Node and Ruby bump work, and every
+  driver wires changelog_tool from the detected version strategy. What remains concentrates on
+  four surfaces: the notes command's drift from the ship artifact, typed errors that flatten
+  sub-error context into Strings, a small set of orphan config fields that documentation
+  advertises but no code reads, and a supply-chain caret requirement that allows
+  breaking-per-patch resolution on serde-saphyr's 0.0.x series.
+
+  Overall posture: the release pipeline is production-ready for Rust projects and working for
+  the rest. The remediation list is short, cheap, and localized. The honest verdict is that the
+  biggest risks now are documentation drift rather than code defects.
+
+narratives:
+  - slug: error-architecture-surface
+    title: "The Error Architecture Surface"
+    thesis: "Typed errors with thiserror, zero unwrap() in library code, consistent ? propagation — the spine is sound. The gaps are at the edges: two enums flatten sub-error context into Strings, one library module leaks anyhow::Error, and one logging discard is missing its intent comment."
+    verdict: "The error architecture is the codebase's strongest surface. Seven thiserror enums compose cleanly. The remaining issues are all localized (three files, mostly mechanical) and together they would lift diagnostic quality for users who run into edge failures without -vv logging. None are urgent."
+
+    findings:
+      - slug: notes-error-flattens-source-chain
+        title: "NotesError::CliffContext / CliffRender flatten sub-errors into String, breaking source() chain"
+        criterion: "ERR-1"
+        surface: "Error Handling"
+        concern: moderate
+        locations:
+          - path: crates/scrat-core/src/notes.rs
+            start_line: 22
+            end_line: 41
+        evidence: |
+          /// Errors from the release notes rendering pipeline.
+          #[derive(Error, Debug)]
+          pub enum NotesError {
+              /// Failed to run `git-cliff --context` or parse its output.
+              #[error("git-cliff context extraction failed: {0}")]
+              CliffContext(String),
+
+              /// Failed to run `git-cliff --from-context` to render notes.
+              #[error("git-cliff rendering failed: {0}")]
+              CliffRender(String),
+
+              /// Failed to read a custom template file.
+              #[error("failed to read template at {path}: {source}")]
+              ReadTemplate {
+                  /// Path to the template file.
+                  path: String,
+                  /// The underlying I/O error.
+                  source: std::io::Error,
+              },
+          }
+        evidence_lang: rust
+        evidence_markers:
+          - lines: "4-6"
+            type: del
+            label: "CliffContext takes String; heterogeneous sub-errors are stringified at call sites"
+          - lines: "8-10"
+            type: del
+            label: "same pattern: CliffRender(String)"
+          - lines: "12-19"
+            type: ins
+            label: "ReadTemplate demonstrates the correct #[source] pattern"
+        mechanism: |
+          ReadTemplate demonstrates the correct thiserror pattern (#[source] std::io::Error).
+          CliffContext and CliffRender take a String, and six call sites in the same file (lines
+          95, 115, 353, 357, 378, 406) heterogeneously format std::io::Error, serde_json::Error,
+          semver::Error, and crate::git::GitError into that String via format!("... {e}").
+          Error::source() returns None for these variants. The same anti-pattern appears in
+          BumpError::ToolFailed (crates/scrat-core/src/bump.rs, lines 34-41) with ~20 call sites
+          across version_files.rs and bump.rs. Net effect: the CLI's careful
+          `err.chain().skip(1).for_each(|cause| eprintln!(...))` rendering in main.rs collapses to
+          a single "Error: ..." line, and users must re-run with -vv to get the actual underlying
+          failure detail.
+        remediation: |
+          Introduce sub-variants that preserve the source via #[from]:
+          CliffExec(#[from] std::io::Error), CliffJson(#[from] serde_json::Error), etc. Keep a
+          String variant only for "tool returned nonzero with stderr" where there is no
+          underlying Rust error to preserve. Apply the same treatment to BumpError (ToolIo /
+          ToolParse / ToolSerialize variants alongside the existing ToolFailed String variant
+          for shell exit codes). Most callers can drop the format! wrapper and rely on #[from]
+          to preserve context via the source chain.
+        chains:
+          enables: []
+          enabled_by: []
+          related: []
+        effort: medium
+        effort_notes: "Mechanical across ~30 call sites; trivial per-site. Phase: NotesError first (smaller blast radius), BumpError second."
+
+      - slug: observability-returns-anyhow-in-library
+        title: "Public library function init_observability returns anyhow::Error"
+        criterion: "ERR-4"
+        surface: "Error Handling"
+        concern: moderate
+        locations:
+          - path: crates/scrat-core/src/observability.rs
+            start_line: 67
+            end_line: 70
+        evidence: |
+          pub fn init_observability(
+              cfg: &ObservabilityConfig,
+              env_filter: EnvFilter,
+          ) -> Result<ObservabilityGuard> {
+        evidence_lang: rust
+        evidence_markers:
+          - lines: "4"
+            type: del
+            label: "Result<T> with no error type — resolves to anyhow::Result via `use anyhow::Result`"
+        mechanism: |
+          scrat-core is the library half of a "thin CLI, fat core" architecture. Every other
+          module (bump, ship, notes, git, hooks, version, config) exposes typed errors via
+          thiserror enums. observability is the sole exception: `use anyhow::Result;` at line 6
+          feeds through to the public init_observability signature. Downstream consumers of
+          scrat-core cannot pattern match on the failure cause — anyhow::Error is a
+          Box<dyn Error> in disguise. The function already swallows its internal failure (lines
+          71-80 fall back to stderr and return Ok regardless), so the Result return type is both
+          unnecessary and type-erasing.
+        remediation: |
+          Define an ObservabilityError enum with thiserror in the same file. Change the signature
+          to `pub fn init_observability(...) -> Result<ObservabilityGuard, ObservabilityError>`.
+          The typed errors are already implicit in the existing Result<_, String> helpers
+          (resolve_log_target, log_target_from_dir, log_target_from_path, ensure_writable) —
+          publish that type instead of stringifying it. The CLI in main.rs already converts
+          library errors via `?` + `.context(...)`, so the binary surface is unaffected.
+        chains:
+          enables: []
+          enabled_by: []
+          related: []
+        effort: small
+        effort_notes: "Single file; typed errors already exist internally as Result<_, String> — replace String with an enum."
+
+      - slug: observability-writer-silent-discard
+        title: "JsonLogLayer silently discards write_all and serialize errors without explanatory comment"
+        criterion: "ERR-3"
+        surface: "Error Handling"
+        concern: advisory
+        locations:
+          - path: crates/scrat-core/src/observability.rs
+            start_line: 196
+            end_line: 202
+        evidence: |
+                  // Buffer the entire line so it's written in a single write() syscall,
+                  // which is atomic with O_APPEND for lines under PIPE_BUF (typically 4096).
+                  if let Ok(mut buf) = serde_json::to_vec(&Value::Object(map)) {
+                      buf.push(b'\n');
+                      let mut writer = self.writer.make_writer();
+                      let _ = writer.write_all(&buf);
+                  }
+        evidence_lang: rust
+        evidence_markers:
+          - lines: "3"
+            type: mark
+            label: "serde_json::to_vec failure drops the log line silently"
+          - lines: "6"
+            type: mark
+            label: "write_all failure discarded without instrumentation"
+        mechanism: |
+          The `let _ = writer.write_all(...)` at line 201 silently drops a failed log write,
+          and the outer `if let Ok(...)` at line 198 silently drops serde_json::to_vec failures
+          — the whole log line is dropped with no instrumentation. Logging layers commonly
+          swallow errors intentionally (a logging failure should not panic the program, and
+          cannot itself be logged), but the discard appears with no comment explaining the
+          intent. Contrast with the similar pattern in git.rs, which was explicitly converted
+          from `let _ = git(&["fetch", "--quiet"])` to
+          `if let Err(e) = git(...) { debug!(error = %e, ...) }` with a clear explanatory
+          comment. The logging layer is the one surviving unexplained discard in production
+          code.
+        remediation: |
+          Add a one-line comment above the discard explaining the intent (e.g., "Intentional:
+          logging must never panic or error back through the program; stderr fallback already
+          resolved at init_observability"). Optionally promote the discard to an AtomicUsize
+          "dropped log lines" counter that `scrat doctor` can surface for diagnosis.
+        chains:
+          enables: []
+          enabled_by: []
+          related: []
+        effort: trivial
+        effort_notes: "One or two lines of comment; optional atomic counter."
+
+      - slug: expect-messages-describe-value-not-invariant
+        title: "expect() messages describe the value rather than the invariant"
+        criterion: "ERR-2"
+        surface: "Error Handling"
+        concern: advisory
+        locations:
+          - path: crates/scrat/src/commands/doctor.rs
+            start_line: 112
+            end_line: 116
+        evidence: |
+              spinner.set_style(
+                  ProgressStyle::default_spinner()
+                      .template("{spinner:.cyan} {msg}")
+                      .expect("valid template"),
+              );
+        evidence_lang: rust
+        evidence_markers:
+          - lines: "4"
+            type: mark
+            label: "message paraphrases the value rather than the invariant"
+        mechanism: |
+          Two indicatif ProgressStyle::template calls (doctor.rs:115 and ship.rs:258) unwrap via
+          `expect("valid template")` / `expect("valid spinner template")`. The messages
+          paraphrase the value ("template is valid") rather than state the invariant ("indicatif
+          must accept this literal; failure would indicate a typo or an indicatif breaking
+          change"). Under ANSSI LANG-NOPANIC these pass the strict "no empty or nonsense
+          messages" bar, but they miss the opportunity to orient a future maintainer who sees a
+          panic message in a crash report — the literal template is the only useful diagnostic,
+          and the current message doesn't carry it.
+        remediation: |
+          Replace with messages that carry both the literal and the invariant, e.g.,
+          `.expect("indicatif must accept literal template '{spinner:.cyan} {msg}'")` in
+          doctor.rs (line 115) and the equivalent for the ship-phase spinner template in
+          ship.rs (line 258). Preserves the compile-time expect pattern while making a
+          production panic actionable from the message alone.
+        chains:
+          enables: []
+          enabled_by: []
+          related: []
+        effort: trivial
+        effort_notes: "Two strings in two files."
+
+  - slug: supply-chain-surface
+    title: "The Supply Chain Surface"
+    thesis: "cargo-audit clean on 189 deps, cargo-deny clean on advisories/licenses/sources, cargo-machete clean on unused deps. The remaining risk lives in two places: a 0.0-caret on serde-saphyr that allows breaking-per-patch resolution, and a library crate pulling clap just for two ValueEnum derives the CLI could own. CI gates don't flag yanked or unmaintained crates."
+    verdict: "The current footprint is safe today. The hardening work is trivial — three lines in deny.toml, two Cargo.toml edits, roughly thirty lines to move the clap derives out of scrat-core. The transitive-duplicate warnings (getrandom, r-efi, supports-color) are upstream-owned and should be silenced in deny.toml so they stop drowning real signal."
+
+    findings:
+      - slug: scrat-core-depends-on-clap-for-value-enum-derives
+        title: "Library crate scrat-core pulls clap just for two ValueEnum derives"
+        criterion: "PERF-13.7"
+        surface: "Dependency Fitness"
+        concern: moderate
+        locations:
+          - path: crates/scrat-core/Cargo.toml
+            start_line: 33
+            end_line: 33
+        evidence: |
+          clap = { version = "4.6", features = ["derive"] }
+        evidence_lang: toml
+        evidence_markers:
+          - lines: "1"
+            type: del
+            label: "CLI framework dep in a library crate — leaks into every downstream consumer"
+        mechanism: |
+          scrat-core is published as a library ("Core library for scrat") and re-exported via
+          crates/scrat/Cargo.toml. Its only use of clap is two `#[derive(..., clap::ValueEnum)]`
+          attributes in init.rs (ConfigFormat and ConfigStyle enums). Depending on clap+derive
+          from the library leaks a CLI-parser dependency into every downstream consumer of
+          scrat-core, drags clap_builder + clap_derive (proc-macro) + anstyle + strsim + 15+
+          transitive crates into non-CLI embedders, and contradicts the workspace's documented
+          "thin CLI, fat core" rule — CLI parsing concerns belong in the binary crate. A
+          secondary effect: downstream users must accept whatever clap 4.x major version
+          scrat-core picks, or their clap versions conflict.
+        remediation: |
+          Move the clap::ValueEnum derive to CLI-side wrapper enums. For each of ConfigFormat
+          and ConfigStyle, define a mirror enum in crates/scrat/src/commands/init.rs that
+          derives clap::ValueEnum and has a trivial `From<CliConfigFormat>` for
+          `scrat_core::ConfigFormat`. Then drop clap from crates/scrat-core/Cargo.toml entirely.
+          Alternatively, gate the library's clap derives behind a `cli` feature flag with
+          `optional = true` on the dep and `#[cfg_attr(feature = "cli", derive(clap::ValueEnum))]`
+          on the enums — opt-in for the current tight coupling, skip cost for other consumers.
+        chains:
+          enables: []
+          enabled_by: []
+          related: []
+        effort: small
+        effort_notes: "Two mirror enums in the CLI plus From impls, or a feature gate — both under 30 lines."
+
+      - slug: serde-saphyr-caret-on-zero-zero-x
+        title: "serde-saphyr pinned to \"0.0\" allows breaking-per-patch resolution"
+        criterion: "SEC-7.3"
+        surface: "Supply Chain"
+        concern: advisory
+        locations:
+          - path: crates/scrat-core/Cargo.toml
+            start_line: 36
+            end_line: 36
+        evidence: |
+          serde-saphyr = { version = "0.0", features = ["figment"] }
+        evidence_lang: toml
+        evidence_markers:
+          - lines: "1"
+            type: mark
+            label: "caret on 0.0.x is effectively >=0.0.0, <0.1.0 — any 0.0.x can resolve"
+        mechanism: |
+          Cargo's caret on a 0.0.x dependency (e.g., "0.0") resolves to any 0.0.x version, but
+          semver convention treats every 0.0.x patch as potentially breaking. Today
+          serde-saphyr is 0.0.23; a future 0.0.24 with breaking API changes would still satisfy
+          this requirement. When users run `cargo install scrat` without the workspace
+          Cargo.lock, or a downstream consumer updates after a breaking 0.0.x release, the
+          build can break silently. scrat-core is published to crates.io (per `documentation =
+          "https://docs.rs/scrat"`), so the lockfile-free path is a real user surface. A second
+          copy in crates/scrat/Cargo.toml compounds the risk with the same looseness.
+        remediation: |
+          Pin to a tilde or exact version while serde-saphyr remains in the 0.0.x series:
+          change `version = "0.0"` to `version = "~0.0.23"` (or `"= 0.0.23"`) in both
+          crates/scrat/Cargo.toml and crates/scrat-core/Cargo.toml. Bump explicitly when
+          serde-saphyr ships a new 0.0.x, ideally behind a workspace version constant to keep
+          the two Cargo.toml entries aligned.
+        chains:
+          enables: []
+          enabled_by: []
+          related: []
+        effort: trivial
+        effort_notes: "Two Cargo.toml edits plus `cargo update -p serde-saphyr`."
+
+      - slug: ci-lacks-yanked-and-unmaintained-hardening
+        title: "CI cargo-deny does not flag yanked or unmaintained crates"
+        criterion: "SEC-7.2"
+        surface: "Supply Chain"
+        concern: advisory
+        locations:
+          - path: .config/deny.toml
+            start_line: 48
+            end_line: 55
+        evidence: |
+          [advisories]
+          # Always check the RustSec advisory database
+          db-path = "~/.cargo/advisory-db"
+          db-urls = ["https://github.com/RustSec/advisory-db"]
+
+          # Ignore specific advisories (use with caution in enterprise)
+          ignore = [
+          ]
+        evidence_lang: toml
+        evidence_markers:
+          - lines: "1-8"
+            type: mark
+            label: "no yanked / unmaintained / vulnerability gates — cargo-deny defaults are warn, not deny"
+        mechanism: |
+          The project runs `cargo deny check` in CI and has no dedicated `cargo audit` step.
+          cargo-deny's defaults for yanked and unmaintained advisories are "warn", not "deny",
+          so a post-merge yank of any Cargo.lock-pinned crate (or a RustSec unmaintained flag
+          on a direct dep such as serde-saphyr or directories) appears as a warning that does
+          not fail the CI deny job. Rubric criteria 7.2 (yanked crate versions are not used)
+          and 7.5 (unmaintained crates are not used) therefore rely on authors watching CI logs
+          rather than on a hard gate. Release builds use cargo-auditable for post-install
+          scanning, but that is a consumer-side check and does not prevent a yanked-crate
+          regression from landing on main.
+        remediation: |
+          Add explicit gates to .config/deny.toml under [advisories]:
+
+              yanked = "deny"
+              unmaintained = "deny"
+              vulnerability = "deny"
+
+          These are the settings cargo-deny 0.19+ expects under [advisories]. Alternatively,
+          add a dedicated `cargo audit --deny warnings` step to ci.yml so RustSec signaling
+          runs through two independent checks.
+        chains:
+          enables: []
+          enabled_by: []
+          related: []
+        effort: trivial
+        effort_notes: "Three lines in deny.toml, or ~8 lines for a new CI step."
+
+      - slug: owo-colors-pulls-duplicate-supports-color
+        title: "owo-colors 4.3.0 pulls supports-color 2.1.0 and 3.0.2 simultaneously"
+        criterion: "PERF-13.6"
+        surface: "Dependency Fitness"
+        concern: note
+        locations:
+          - path: crates/scrat/Cargo.toml
+            start_line: 49
+            end_line: 49
+        evidence: |
+          owo-colors = { version = "4.3", features = ["supports-colors"] }
+        evidence_lang: toml
+        evidence_markers:
+          - lines: "1"
+            type: mark
+            label: "the `supports-colors` feature on owo-colors 4.3.0 pulls both v2 and v3 of supports-color"
+        mechanism: |
+          cargo-deny reports `supports-color` as a 2-version duplicate. Root cause is upstream:
+          owo-colors 4.3.0's `supports-colors` feature declares both
+          `supports-color = "3.0.0"` and (via package rename) `supports-color-2 = "2.0"`,
+          pulling both into the dependency graph by design. scrat cannot dedupe this without
+          dropping the `supports-colors` feature on owo-colors — which would remove the
+          terminal-capability auto-detect used for color rendering. The duplicate is harmless
+          (both versions are small, both get linked) but shows up in every cargo-deny and
+          cargo-tree report and will not clear without either an owo-colors upstream fix or a
+          local fork.
+        remediation: |
+          No in-project fix is clean. Preferred path: document the duplicate in
+          .config/deny.toml with `[bans] skip = [{ name = "supports-color" }]` to silence the
+          warning so it stops drowning real signal in CI. The duplicate is advisory-only
+          because the existing fitness criterion 13.6 targets direct-dependency duplication;
+          this is upstream transitive.
+        chains:
+          enables: []
+          enabled_by: []
+          related: [transitive-getrandom-triplicate]
+        effort: trivial
+        effort_notes: "One-line skip entry in deny.toml."
+
+      - slug: transitive-getrandom-triplicate
+        title: "Three getrandom versions resolve transitively (0.2.17, 0.3.4, 0.4.2)"
+        criterion: "PERF-13.7"
+        surface: "Dependency Fitness"
+        concern: note
+        locations:
+          - path: Cargo.lock
+            start_line: 477
+            end_line: 513
+        evidence: |
+          [[package]]
+          name = "getrandom"
+          version = "0.2.17"
+          source = "registry+https://github.com/rust-lang/crates.io-index"
+          checksum = "ff2abc00be7fca6ebc474524697ae276ad847ad0a6b3faa4bcb027e9a4614ad0"
+          dependencies = [
+           "cfg-if",
+           "libc",
+           "wasi",
+          ]
+
+          [[package]]
+          name = "getrandom"
+          version = "0.3.4"
+          source = "registry+https://github.com/rust-lang/crates.io-index"
+          checksum = "899def5c37c4fd7b2664648c28120ecec138e4d395b459e5ca34f9cce2dd77fd"
+          dependencies = [
+           "cfg-if",
+           "js-sys",
+           "libc",
+           "r-efi 5.3.0",
+           "wasip2",
+           "wasm-bindgen",
+          ]
+
+          [[package]]
+          name = "getrandom"
+          version = "0.4.2"
+          source = "registry+https://github.com/rust-lang/crates.io-index"
+          checksum = "0de51e6874e94e7bf76d726fc5d13ba782deca734ff60d5bb2fb2607c7406555"
+          dependencies = [
+           "cfg-if",
+           "libc",
+           "r-efi 6.0.0",
+           "wasip2",
+           "wasip3",
+          ]
+        evidence_lang: toml
+        evidence_markers:
+          - lines: "3"
+            type: mark
+            label: "getrandom 0.2.17 — via directories → redox_users (Redox cfg-gated)"
+          - lines: "14"
+            type: mark
+            label: "getrandom 0.3.4 — via serde-saphyr → ahash"
+          - lines: "26"
+            type: mark
+            label: "getrandom 0.4.2 — via tempfile"
+        mechanism: |
+          getrandom 0.2.17 comes via `directories v6 -> dirs-sys v0.5 -> redox_users -> getrandom
+          0.2` (compiled only on Redox targets), getrandom 0.3.4 via `serde-saphyr -> ahash ->
+          getrandom 0.3`, and getrandom 0.4.2 via `tempfile v3.27 -> getrandom 0.4`. r-efi
+          5.3.0 and 6.0.0 ride along with the 0.3/0.4 lines. None of these are direct deps; the
+          triplication comes from three independent upstream version requirements that cannot
+          be satisfied by a single getrandom minor. The redox_users copy is cfg-gated and not
+          loaded on macOS/Linux/Windows at runtime, but still contributes to compile time on
+          the dependency resolution pass. Remediable only by waiting for ahash and tempfile to
+          re-converge on one getrandom, or by dropping `directories` in favor of a direct XDG
+          env-var lookup.
+        remediation: |
+          Two paths, both advisory: (1) wait for upstream alignment — ahash 0.9+ and tempfile
+          3.x-next may converge on getrandom 0.4 once it stabilizes; track and take no action
+          now. (2) Optional: replace the three `directories::ProjectDirs::from` calls
+          (crates/scrat-core/src/config.rs and observability.rs) with a hand-rolled XDG lookup
+          reading XDG_CONFIG_HOME / XDG_DATA_HOME / HOME directly. Drops the
+          `directories -> dirs-sys -> redox_users -> getrandom 0.2` chain (~6 transitive crates
+          saved, mostly on Unix). Narrow enough (three call sites, all ProjectDirs::from) that
+          a 40-line replacement is plausible. Not high priority for a macOS-first tool.
+        chains:
+          enables: []
+          enabled_by: []
+          related: [owo-colors-pulls-duplicate-supports-color]
+        effort: small
+        effort_notes: "Option 1: zero effort. Option 2: ~40 LOC replacing directories with env-var XDG lookups."
+
+  - slug: pipeline-efficiency-surface
+    title: "The Pipeline Efficiency Surface"
+    thesis: "The headline wins from the 2026-04-09 audit are already merged — detection runs once in plan_ship, PipelineContext serializes only when a filter: hook exists. What remains: one redundant git rev-parse per ship, an uncached which::which loop across tool probing, and a release profile that doesn't pull the trivial LTO/strip levers."
+    verdict: "None of these affect correctness. Together they add up to tens of milliseconds on a ship run, plus one-time binary-size savings. The release profile tweak is the most user-visible — every installed binary ships smaller and starts faster, with no code changes."
+
+    flow:
+      - id: cli-start
+        label: "scrat ship"
+        type: start
+      - id: plan-ship
+        label: "plan_ship"
+        type: process
+      - id: detect-once
+        label: "resolve_detection (once)"
+        type: process
+      - id: preflight
+        label: "run_preflight"
+        type: process
+        findings:
+          - slug: has-binary-path-probe-not-cached
+            label: "PATH probing uncached"
+      - id: branch-1
+        label: "current_branch (preflight)"
+        type: process
+        findings:
+          - slug: redundant-git-current-branch-per-ship
+            label: "git #1"
+      - id: execute
+        label: "ReadyShip::execute"
+        type: process
+      - id: branch-2
+        label: "current_branch (execute)"
+        type: process
+        findings:
+          - slug: redundant-git-current-branch-per-ship
+            label: "git #2"
+      - id: phases
+        label: "7 phases, 12 hook points"
+        type: process
+      - id: done
+        label: "Ship complete"
+        type: end
+
+    findings:
+      - slug: redundant-git-current-branch-per-ship
+        title: "git::current_branch() invoked twice per ship run for an invariant value"
+        criterion: "PERF-12"
+        surface: "Performance"
+        concern: advisory
+        locations:
+          - path: crates/scrat-core/src/preflight.rs
+            start_line: 188
+            end_line: 198
+        evidence: |
+          fn check_release_branch(override_branch: Option<&str>) -> CheckResult {
+              let current = match git::current_branch() {
+                  Ok(Some(b)) => b,
+                  Ok(None) => {
+                      return CheckResult {
+                          name: "Release branch".into(),
+                          passed: false,
+                          message: "Detached HEAD — not on any branch".into(),
+                          skip_flag: None,
+                      };
+                  }
+        evidence_lang: rust
+        evidence_markers:
+          - lines: "2"
+            type: mark
+            label: "first git rev-parse call in preflight"
+        mechanism: |
+          A ship run resolves the current branch in preflight (check_release_branch line 189)
+          and again when building the PipelineContext in ReadyShip::execute() (ship.rs line
+          448). Each call is a separate `git rev-parse --abbrev-ref HEAD` — a fork+exec that
+          costs ~5-15ms on macOS. The branch cannot change between plan and execute within the
+          same process, so the second call is pure waste. The Phase 4 ecosystem refactor
+          deduplicated detection and preflight but did not thread branch through from preflight
+          to execute.
+        remediation: |
+          Stash the branch result on ReadyShip (populated during plan_ship by reading
+          report.checks or by calling current_branch once in plan_ship and passing it in
+          alongside detection). Then read `self.branch` in execute() instead of re-invoking
+          git. Alternatively, add a `ProjectDetection.branch: Option<String>` field if callers
+          outside ship want it.
+        chains:
+          enables: []
+          enabled_by: []
+          related: [has-binary-path-probe-not-cached]
+        effort: small
+        effort_notes: "Add one field to ReadyShip, populate once in plan_ship, read in execute. ~15 lines."
+
+      - slug: release-profile-missing-lto-and-strip
+        title: "Release profile sets no optimizations beyond default — no LTO, no strip, default codegen-units"
+        criterion: "PERF-8"
+        surface: "Performance"
+        concern: advisory
+        locations:
+          - path: Cargo.toml
+            start_line: 57
+            end_line: 59
+        evidence: |
+          # Release profile with reduced debug info
+          [profile.release]
+          debug = "line-tables-only"
+        evidence_lang: toml
+        evidence_markers:
+          - lines: "2-3"
+            type: mark
+            label: "no lto, no strip, no codegen-units — every easy binary-size and startup-time lever unused"
+        mechanism: |
+          For a user-facing CLI invoked interactively (startup latency matters) and distributed
+          via crates.io (binary size matters), the default release profile leaves easy wins on
+          the table. With `lto = "thin"`, `codegen-units = 1`, and `strip = "symbols"`, a
+          binary of this shape typically sees 10-20% smaller output and measurable
+          startup-time improvements from better cross-crate inlining — especially between
+          scrat-core and scrat given the thin-CLI architecture, where every command does
+          `scrat → scrat_core::*`. Thin LTO adds 10-30s to a full release build, which is
+          cheap insurance for binaries downloaded by users.
+        remediation: |
+          Add to [profile.release]:
+
+              lto = "thin"
+              codegen-units = 1
+              strip = "symbols"
+
+          Benchmark: `hyperfine --warmup 3 'scrat --version'` before and after. A startup
+          improvement above 3ms is a win given that `scrat info` and `scrat preflight` are
+          invoked interactively. If release build time becomes noticeable, downgrade to
+          `lto = "thin"` + default codegen-units.
+        chains:
+          enables: []
+          enabled_by: []
+          related: []
+        effort: trivial
+        effort_notes: "Three lines in Cargo.toml. Verify `cargo build --release` still succeeds and measure startup."
+
+      - slug: has-binary-path-probe-not-cached
+        title: "detect::has_binary probes PATH ~5-8 times per ship run with no cache"
+        criterion: "PERF-12"
+        surface: "Performance"
+        concern: note
+        locations:
+          - path: crates/scrat-core/src/detect.rs
+            start_line: 131
+            end_line: 134
+        evidence: |
+          /// Check whether a binary is available on `PATH`.
+          pub fn has_binary(name: &str) -> bool {
+              which::which(name).is_ok()
+          }
+        evidence_lang: rust
+        evidence_markers:
+          - lines: "3"
+            type: mark
+            label: "no memoization — each call walks PATH fresh"
+        mechanism: |
+          which::which walks PATH, stats each directory for the binary name, and on some
+          platforms checks executable-ish variations. A single plan_ship invokes has_binary for:
+          git-cliff (in detect_version_strategy), cargo, cargo-nextest, cargo-set-version (in
+          RustDriver::detect), then in check_required_tools the same binaries are re-probed via
+          `has_binary(test_cmd.split_whitespace().next())`, plus gh in check_gh_auth. Each
+          probe is cheap (~1-2ms on a normal macOS PATH), but they aggregate to ~10-15ms of
+          pure syscall cost per ship run. The binaries cannot move during a single process, so
+          the probing is idempotent. Same binaries are also re-probed for `scrat info` and
+          `scrat doctor`.
+        remediation: |
+          Wrap has_binary with a process-lifetime `OnceLock<Mutex<HashMap<String, bool>>>`:
+
+              use std::sync::{Mutex, OnceLock};
+              use std::collections::HashMap;
+              static PATH_CACHE: OnceLock<Mutex<HashMap<String, bool>>> = OnceLock::new();
+              pub fn has_binary(name: &str) -> bool {
+                  let cache = PATH_CACHE.get_or_init(Default::default);
+                  if let Some(&v) = cache.lock().unwrap().get(name) { return v; }
+                  let v = which::which(name).is_ok();
+                  cache.lock().unwrap().insert(name.to_owned(), v);
+                  v
+              }
+
+          Shaves single-digit ms on ship but meaningful on `scrat info` (runs detection twice
+          through the same call paths for display). Add a `#[cfg(test)] fn clear_path_cache()`
+          if any test relies on detecting a binary installed mid-run.
+        chains:
+          enables: []
+          enabled_by: []
+          related: [redundant-git-current-branch-per-ship]
+        effort: small
+        effort_notes: "~20 lines including the cache and a test-only clear hook."
+
+  - slug: feature-completeness-surface
+    title: "The Feature Completeness Surface"
+    thesis: "Seven ecosystems now ship real bump, deps, and detect behavior — the Node and Ruby gaps from the 2026-04-09 audit are closed. The remaining completeness debt has moved into `scrat notes` (the standalone preview diverges from the shipped artifact in two ways) and into the config surface, where three documented knobs have no implementation and example-config advertises OTel plumbing that doesn't exist."
+    verdict: "The notes command is the most impactful fix. Users are sold a preview that can't regenerate past releases and won't include filter-hook mutations — a significant-level divergence between the command's promise and its behavior. The orphan config fields are each trivial individually but together erode trust across the config surface; honest fix is deletion unless the roadmap includes implementation soon. The UnsupportedEcosystem error variant is a leftover from the pre-Phase-4 era and should go."
+
+    flow:
+      - id: cli-args
+        label: "scrat notes --from v1.0.0"
+        type: start
+      - id: parse
+        label: "Parse PreviewNotesOptions"
+        type: process
+      - id: preview-notes
+        label: "preview_notes()"
+        type: process
+      - id: resolve-tag
+        label: "Resolve previous_tag (uses --from ✓)"
+        type: process
+      - id: compute-deps
+        label: "deps::compute_deps (uses previous_tag ✓)"
+        type: process
+      - id: compute-stats
+        label: "stats::compute_stats (uses previous_tag ✓)"
+        type: process
+      - id: hooks-gap
+        label: "hooks::run_hooks?"
+        type: decision
+        no: render
+        findings:
+          - slug: notes-command-skips-all-hooks
+            label: "Never called"
+      - id: render
+        label: "render_notes → run_cliff_context"
+        type: process
+        spine: false
+        next: cliff
+      - id: cliff
+        label: "git-cliff --unreleased --context"
+        type: process
+        findings:
+          - slug: notes-from-flag-ignored-by-cliff-context
+            label: "ignores --from tag"
+      - id: notes-out
+        label: "Notes rendered or empty"
+        type: end
+
+    findings:
+      - slug: notes-from-flag-ignored-by-cliff-context
+        title: "`scrat notes --from` does not affect the rendered release notes"
+        criterion: "14.1"
+        surface: "Feature Completeness"
+        concern: significant
+        locations:
+          - path: crates/scrat-core/src/notes.rs
+            start_line: 347
+            end_line: 371
+        evidence: |
+          /// Run `git-cliff --unreleased --context` and capture JSON output.
+          fn run_cliff_context(project_root: &Utf8Path) -> Result<String, NotesError> {
+              let output = Command::new("git-cliff")
+                  .args(["--unreleased", "--context"])
+                  .current_dir(project_root.as_std_path())
+                  .output()
+                  .map_err(|e| NotesError::CliffContext(format!("failed to execute git-cliff: {e}")))?;
+
+              if !output.status.success() {
+                  let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+                  return Err(NotesError::CliffContext(format!(
+                      "git-cliff exited with {}: {stderr}",
+                      output.status
+                  )));
+              }
+
+              let stdout = String::from_utf8_lossy(&output.stdout).to_string();
+              if stdout.trim().is_empty() {
+                  return Err(NotesError::CliffContext(
+                      "git-cliff produced empty context output".into(),
+                  ));
+              }
+
+              Ok(stdout)
+          }
+        evidence_lang: rust
+        evidence_markers:
+          - lines: "4"
+            type: del
+            label: "hardcoded --unreleased; no tag range, no reference to previous_tag"
+        mechanism: |
+          README documents `scrat notes --from v1.0.0` as "diff against specific tag" and the
+          CLI help text declares --from as the "Previous version tag to diff against". The
+          implementation stores options.from in previous_tag for stats and dep-diff computation,
+          but the git-cliff invocation that produces the actual notes body always passes
+          `--unreleased --context` with no range selector. For any already-tagged release the
+          call returns an empty context and preview_notes fails with "git-cliff produced empty
+          context output" — historical release notes cannot be regenerated. The --from flag
+          influences two side channels (stats, deps) but not the primary artifact the command
+          produces. This matches the "notes CLI can't regenerate past releases" gap already
+          recorded in project memory.
+        remediation: |
+          Forward the resolved previous_tag to git-cliff as a range/tag selector — either
+          `--tag <new-tag>` paired with a range like `<from>..HEAD`, or a per-release
+          `--tag-pattern`. Fall back to `--unreleased` only when no explicit --from is provided
+          and no prior tag exists.
+        chains:
+          enables: []
+          enabled_by: []
+          related: [notes-command-skips-all-hooks]
+        effort: small
+        effort_notes: "Swap one Command::new arg list; previous_tag is already in scope."
+
+      - slug: notes-command-skips-all-hooks
+        title: "`scrat notes` never runs hooks — preview diverges from shipped artifact"
+        criterion: "14.1"
+        surface: "Feature Completeness"
+        concern: advisory
+        locations:
+          - path: crates/scrat-core/src/notes.rs
+            start_line: 158
+            end_line: 175
+        evidence: |
+              // Compute stats
+              if !options.no_stats && !previous_tag.is_empty() {
+                  ctx.stats = stats::compute_stats(&ctx.previous_tag);
+                  if ctx.stats.is_some() {
+                      debug!("stats computed");
+                  }
+              }
+
+              // Determine template: options > config > built-in
+              let template = options.template.as_deref().or_else(|| {
+                  config
+                      .release
+                      .as_ref()
+                      .and_then(|r| r.notes_template.as_deref())
+              });
+
+              // Render
+              let notes = render_notes(project_root, &ctx, template)?;
+        evidence_lang: rust
+        evidence_markers:
+          - lines: "1-18"
+            type: mark
+            label: "no hooks::run_hooks call anywhere between ctx population and render"
+        mechanism: |
+          README frames `scrat notes` as a low-friction preview of what ship will produce:
+          "Renders release notes without shipping. Useful for previewing what the notes will
+          look like." When `scrat ship` runs, filter: hooks (and any post-bump hook that
+          mutates metadata) can rewrite the PipelineContext that feeds git-cliff.
+          preview_notes never calls hooks::run_hooks, so users who rely on filter hooks to
+          shape release notes (the whole point of the filter: prefix) see a preview that does
+          not match the artifact ship will produce. This matches the "notes CLI skips hooks"
+          gap already recorded in project memory.
+        remediation: |
+          Thread config.hooks through preview_notes and execute at least the applicable
+          filter: and post_bump-phase hooks against the preview context before calling
+          render_notes. Alternatively, document `scrat notes` as a pre-hook preview and direct
+          users to `scrat ship --dry-run` for hook-aware previews.
+        chains:
+          enables: []
+          enabled_by: [notes-from-flag-ignored-by-cliff-context]
+          related: []
+        effort: small
+        effort_notes: "Invoke existing hooks::run_hooks; no new machinery needed."
+
+      - slug: orphan-commands-build-and-clean-config
+        title: "commands.build and commands.clean are parsed, documented, but never read"
+        criterion: "14.1"
+        surface: "Feature Completeness"
+        concern: advisory
+        locations:
+          - path: crates/scrat-core/src/config.rs
+            start_line: 105
+            end_line: 115
+        evidence: |
+          #[derive(Debug, Clone, Default, Deserialize, Serialize, PartialEq, Eq)]
+          pub struct CommandsConfig {
+              /// Override the test command (e.g., `"cargo nextest run"`).
+              pub test: Option<String>,
+              /// Override the build command (e.g., `"cargo build --release"`).
+              pub build: Option<String>,
+              /// Override the publish command (e.g., `"cargo publish"`).
+              pub publish: Option<String>,
+              /// Override the clean command.
+              pub clean: Option<String>,
+          }
+        evidence_lang: rust
+        evidence_markers:
+          - lines: "6"
+            type: mark
+            label: "build — declared and doc'd, no production read"
+          - lines: "10"
+            type: mark
+            label: "clean — declared and doc'd, no production read"
+        mechanism: |
+          README Configuration > Full Reference and config/scrat.toml.example (line 58-62)
+          advertise commands.build and commands.clean as override knobs. A repo-wide grep for
+          every `.build` and `.clean` reference in the core crate finds these fields only in
+          the struct definition and a single deserialization round-trip test — no phase reads
+          config.commands.build or config.commands.clean, and scrat has neither a `build` nor a
+          `clean` subcommand. A user who sets `[commands] build = "just package"` sees no
+          feedback, no warning, and no behavior change. Silent no-op config erodes trust in
+          every other config surface.
+        remediation: |
+          Either wire these into the pipeline (e.g., auto-invoke commands.build before the
+          publish phase if set) or delete both fields with their example-config entries and
+          README mentions. Given no build/clean phase is on the stated roadmap, prefer
+          deletion.
+        chains:
+          enables: []
+          enabled_by: []
+          related: [orphan-release-changelog-tool-config, example-config-advertises-unimplemented-otel-and-env]
+        effort: trivial
+        effort_notes: "Delete two fields and their doc comments, or extend ship.rs to read them."
+
+      - slug: orphan-release-changelog-tool-config
+        title: "release.changelog_tool config field is parsed but never consulted"
+        criterion: "14.1"
+        surface: "Feature Completeness"
+        concern: advisory
+        locations:
+          - path: crates/scrat-core/src/config.rs
+            start_line: 117
+            end_line: 121
+        evidence: |
+          /// Release workflow configuration.
+          #[derive(Debug, Clone, Default, Deserialize, Serialize, PartialEq, Eq)]
+          pub struct ReleaseConfig {
+              /// Override the changelog tool (currently only `"git-cliff"` is supported).
+              pub changelog_tool: Option<ChangelogTool>,
+        evidence_lang: rust
+        evidence_markers:
+          - lines: "5"
+            type: mark
+            label: "parsed and doc'd; production reads `detection.tools.changelog_tool` instead"
+        mechanism: |
+          config/scrat.toml.example line 69 advertises `changelog_tool = "git-cliff"` as a
+          release knob. In practice scrat derives the changelog tool from VersionStrategy in
+          each driver's detect() and production reads consult detection.tools.changelog_tool.
+          A repo-wide grep for `release.changelog_tool` as a Rust expression finds only the
+          struct field and a deserialization round-trip test. No code path feeds a user-provided
+          release.changelog_tool back into detection or pipeline flow. The knob is silently
+          accepted and silently ignored.
+        remediation: |
+          Either honor the override (propagate the value into DetectedTools.changelog_tool when
+          set) or remove the field and its example-config entry. Current state is documented
+          behavior with no implementation.
+        chains:
+          enables: []
+          enabled_by: []
+          related: [orphan-commands-build-and-clean-config]
+        effort: trivial
+
+      - slug: example-config-advertises-unimplemented-otel-and-env
+        title: "otel_endpoint and SCRAT_ENV documented in example config are unimplemented"
+        criterion: "14.1"
+        surface: "Feature Completeness"
+        concern: note
+        locations:
+          - path: config/scrat.toml.example
+            start_line: 26
+            end_line: 36
+        evidence: |
+          # Log files are written as JSONL with daily rotation.
+          # Default paths:
+          # - /var/log/scrat.jsonl (Unix, if writable)
+          # - ~/.local/share/scrat/logs/scrat.jsonl (fallback)
+          # Override with environment variables:
+          # - SCRAT_LOG_PATH=/path/to/scrat.jsonl  (rotated daily)
+          # - SCRAT_LOG_DIR=/path/to/log/dir
+          # - SCRAT_ENV=dev
+          # Config options:
+          # - log_dir = "/path/to/log/dir"
+          # - otel_endpoint = "http://127.0.0.1:4317"
+        evidence_lang: toml
+        evidence_markers:
+          - lines: "8"
+            type: mark
+            label: "SCRAT_ENV env var not read in any crate"
+          - lines: "11"
+            type: mark
+            label: "otel_endpoint not declared on Config and not read"
+        mechanism: |
+          The canonical example config advertises two integration points that do not exist in
+          source: SCRAT_ENV (claimed env-var override) and otel_endpoint (claimed config knob).
+          A repo-wide grep for `SCRAT_ENV` and `otel` in crates/ returns zero matches — Config
+          has no otel_endpoint field; the observability module never reads the env var. A user
+          following the example config to wire an OTel collector sees no spans and no error.
+        remediation: |
+          Either land the OTel endpoint plumbing against the existing observability module or
+          remove both references from config/scrat.toml.example and from the init templates if
+          they mirror it.
+        chains:
+          enables: []
+          enabled_by: []
+          related: [orphan-commands-build-and-clean-config]
+        effort: trivial
+
+      - slug: bump-error-unsupported-ecosystem-dead-variant
+        title: "BumpError::UnsupportedEcosystem is declared but never returned in production"
+        criterion: "14.3"
+        surface: "Feature Completeness"
+        concern: note
+        locations:
+          - path: crates/scrat-core/src/bump.rs
+            start_line: 43
+            end_line: 49
+        evidence: |
+              /// No bump tool available for this ecosystem.
+              #[error("no bump tool available (install cargo-edit for Rust)")]
+              NoBumpTool,
+
+              /// Ecosystem not supported for bump operations.
+              #[error("bump not yet supported for {0} ecosystem")]
+              UnsupportedEcosystem(Ecosystem),
+        evidence_lang: rust
+        evidence_markers:
+          - lines: "5-7"
+            type: del
+            label: "no production constructor — only referenced by a display test (bump.rs:786)"
+        mechanism: |
+          After Phase 4 (PR #43) every driver implements bump_version_files with real behavior
+          or an explicit `Ok(Vec::new())` no-op (Go, Swift, Generic). The only BumpError
+          variants production code returns are ToolFailed, NoBumpTool, Detection, and Version.
+          UnsupportedEcosystem is constructed only in a single unit test
+          (bump_error_unsupported_ecosystem_display at bump.rs:786). Its error message "bump
+          not yet supported for {0} ecosystem" is misleading — downstream consumers matching
+          on it write unreachable code.
+        remediation: |
+          Remove the variant and the display-only test. If a future scenario truly needs to
+          refuse bump for an ecosystem, reintroduce with a real call site.
+        chains:
+          enables: []
+          enabled_by: []
+          related: []
+        effort: trivial
+
+      - slug: example-config-missing-filter-prefix-docs
+        title: "Example config documents sync: hook prefix but omits filter:"
+        criterion: "14.5"
+        surface: "Feature Completeness"
+        concern: note
+        locations:
+          - path: config/scrat.toml.example
+            start_line: 82
+            end_line: 92
+        evidence: |
+          # ------------------------------------------------------------------------------
+          # Hooks (pre/post commands per phase of `scrat ship`)
+          # ------------------------------------------------------------------------------
+          # Variables: {version}, {prev_version}, {tag}, {changelog_path}, {owner}, {repo}
+          #
+          # Commands run in parallel by default. Prefix with "sync:" to create a
+          # barrier — all prior commands finish, the sync command runs alone, then
+          # subsequent commands resume in parallel.
+          #
+          # Phase order:
+          #   pre_ship → test → bump → git → release → publish → post_ship
+        evidence_lang: toml
+        evidence_markers:
+          - lines: "6-8"
+            type: mark
+            label: "sync: documented; filter: absent despite README and implementation support"
+        mechanism: |
+          README documents filter: as a first-class hook prefix with JSON pipe semantics and a
+          full TOML example. The canonical config/scrat.toml.example documents only sync:.
+          Users starting from the example config — especially those who follow the scrat init
+          scaffolds that mirror it — would not discover the filter: capability without reading
+          the README end-to-end. The implementation in hooks.rs::split_batches supports both
+          prefixes; this is documentation drift rather than a missing feature.
+        remediation: |
+          Add a filter: paragraph and example to config/scrat.toml.example alongside the sync:
+          paragraph. README prose can be lifted verbatim.
+        chains:
+          enables: []
+          enabled_by: []
+          related: []
+        effort: trivial
+
+summary:
+  counts:
+    critical: 0
+    significant: 1
+    moderate: 3
+    advisory: 9
+    note: 6

@@ -1,0 +1,417 @@
+meta:
+  project: scrat
+  commit: 7b2f302a165bac8bd114ddee283d5d396da42e89
+  timestamp: 2026-04-12T19:35:37-04:00
+  scope: full working tree at 7b2f302
+structure:
+  root: /Users/clay/source/claylo/scrat
+  total_files: 123
+  total_lines: 32232
+  languages:
+    - language: BASH
+      files: 1
+      lines: 482
+      percentage: 1.5
+    - language: HTML
+      files: 2
+      lines: 1242
+      percentage: 3.85
+    - language: JavaScript
+      files: 3
+      lines: 199
+      percentage: 0.62
+    - language: JSON
+      files: 7
+      lines: 107
+      percentage: 0.33
+    - language: Markdown
+      files: 24
+      lines: 8414
+      percentage: 26.1
+    - language: Rust
+      files: 48
+      lines: 18376
+      percentage: 57.01
+    - language: Shell
+      files: 2
+      lines: 429
+      percentage: 1.33
+    - language: SVG
+      files: 22
+      lines: 308
+      percentage: 0.96
+    - language: Tera
+      files: 1
+      lines: 96
+      percentage: 0.3
+    - language: TOML
+      files: 7
+      lines: 248
+      percentage: 0.77
+    - language: YAML
+      files: 6
+      lines: 2331
+      percentage: 7.23
+  modules:
+    - name: xtask
+      path: /Users/clay/source/claylo/scrat/xtask
+      files: 6
+      lines: 220
+    - name: scrat
+      path: /Users/clay/source/claylo/scrat/crates/scrat
+      files: 14
+      lines: 2810
+    - name: scrat-core
+      path: /Users/clay/source/claylo/scrat/crates/scrat-core
+      files: 36
+      lines: 15664
+dependencies:
+  manifest: /Users/clay/source/claylo/scrat/Cargo.toml
+  items:
+    - name: clap
+      version: ^4.6
+      kind: direct
+    - name: clap_complete
+      version: ^4.6
+      kind: direct
+    - name: clap_mangen
+      version: ^0.3
+      kind: direct
+    - name: anyhow
+      version: ^1.0
+      kind: direct
+    - name: base64
+      version: ^0.22
+      kind: direct
+    - name: camino
+      version: ^1.2
+      kind: direct
+    - name: indicatif
+      version: ^0.18
+      kind: direct
+    - name: inquire
+      version: ^0.9
+      kind: direct
+    - name: owo-colors
+      version: ^4.3
+      kind: direct
+    - name: serde
+      version: ^1.0
+      kind: direct
+    - name: serde-saphyr
+      version: ^0.0
+      kind: direct
+    - name: serde_json
+      version: ^1.0
+      kind: direct
+    - name: tracing
+      version: ^0.1
+      kind: direct
+    - name: assert_cmd
+      version: ^2.2
+      kind: dev
+    - name: predicates
+      version: ^3.1
+      kind: dev
+    - name: tempfile
+      version: ^3.27
+      kind: dev
+    - name: directories
+      version: ^6.0
+      kind: direct
+    - name: figment
+      version: ^0.10
+      kind: direct
+    - name: glob
+      version: ^0.3
+      kind: direct
+    - name: semver
+      version: ^1.0
+      kind: direct
+    - name: tempfile
+      version: ^3.27
+      kind: direct
+    - name: thiserror
+      version: ^2.0
+      kind: direct
+    - name: toml_edit
+      version: ^0.22
+      kind: direct
+    - name: tracing-appender
+      version: ^0.2
+      kind: direct
+    - name: tracing-subscriber
+      version: ^0.3
+      kind: direct
+    - name: which
+      version: ^7
+      kind: direct
+churn:
+  period: last 12 months
+  hotspots:
+    - path: crates/scrat-core/src/lib.rs
+      commits: 11
+      authors: 1
+      last_touched: 2026-03-27
+      monthly_commits:
+        - 0
+        - 0
+        - 0
+        - 0
+        - 0
+        - 0
+        - 0
+        - 0
+        - 0
+        - 0
+        - 9
+        - 2
+    - path: crates/scrat/src/commands/mod.rs
+      commits: 9
+      authors: 1
+      last_touched: 2026-03-27
+      monthly_commits:
+        - 0
+        - 0
+        - 0
+        - 0
+        - 0
+        - 0
+        - 0
+        - 0
+        - 0
+        - 0
+        - 7
+        - 2
+    - path: crates/scrat-core/src/ship.rs
+      commits: 9
+      authors: 1
+      last_touched: 2026-03-27
+      monthly_commits:
+        - 0
+        - 0
+        - 0
+        - 0
+        - 0
+        - 0
+        - 0
+        - 0
+        - 0
+        - 0
+        - 8
+        - 1
+    - path: crates/scrat-core/src/config.rs
+      commits: 9
+      authors: 1
+      last_touched: 2026-03-27
+      monthly_commits:
+        - 0
+        - 0
+        - 0
+        - 0
+        - 0
+        - 0
+        - 0
+        - 0
+        - 0
+        - 0
+        - 8
+        - 1
+    - path: crates/scrat/src/main.rs
+      commits: 8
+      authors: 1
+      last_touched: 2026-03-27
+      monthly_commits:
+        - 0
+        - 0
+        - 0
+        - 0
+        - 0
+        - 0
+        - 0
+        - 0
+        - 0
+        - 0
+        - 6
+        - 2
+    - path: crates/scrat/src/commands/ship.rs
+      commits: 8
+      authors: 1
+      last_touched: 2026-02-17
+      monthly_commits:
+        - 0
+        - 0
+        - 0
+        - 0
+        - 0
+        - 0
+        - 0
+        - 0
+        - 0
+        - 0
+        - 8
+        - 0
+    - path: crates/scrat-core/Cargo.toml
+      commits: 8
+      authors: 1
+      last_touched: 2026-03-27
+      monthly_commits:
+        - 0
+        - 0
+        - 0
+        - 0
+        - 0
+        - 0
+        - 0
+        - 0
+        - 0
+        - 0
+        - 6
+        - 2
+    - path: crates/scrat/src/lib.rs
+      commits: 7
+      authors: 1
+      last_touched: 2026-03-27
+      monthly_commits:
+        - 0
+        - 0
+        - 0
+        - 0
+        - 0
+        - 0
+        - 0
+        - 0
+        - 0
+        - 0
+        - 6
+        - 1
+    - path: Cargo.lock
+      commits: 7
+      authors: 1
+      last_touched: 2026-03-27
+      monthly_commits:
+        - 0
+        - 0
+        - 0
+        - 0
+        - 0
+        - 0
+        - 0
+        - 0
+        - 0
+        - 0
+        - 5
+        - 2
+    - path: README.md
+      commits: 6
+      authors: 1
+      last_touched: 2026-03-27
+      monthly_commits:
+        - 0
+        - 0
+        - 0
+        - 0
+        - 0
+        - 0
+        - 0
+        - 0
+        - 0
+        - 0
+        - 2
+        - 4
+    - path: crates/scrat/tests/cli.rs
+      commits: 6
+      authors: 1
+      last_touched: 2026-03-27
+      monthly_commits:
+        - 0
+        - 0
+        - 0
+        - 0
+        - 0
+        - 0
+        - 0
+        - 0
+        - 0
+        - 0
+        - 5
+        - 1
+    - path: crates/scrat-core/src/preflight.rs
+      commits: 6
+      authors: 1
+      last_touched: 2026-03-27
+      monthly_commits:
+        - 0
+        - 0
+        - 0
+        - 0
+        - 0
+        - 0
+        - 0
+        - 0
+        - 0
+        - 0
+        - 3
+        - 3
+    - path: crates/scrat-core/src/notes.rs
+      commits: 6
+      authors: 1
+      last_touched: 2026-03-27
+      monthly_commits:
+        - 0
+        - 0
+        - 0
+        - 0
+        - 0
+        - 0
+        - 0
+        - 0
+        - 0
+        - 0
+        - 3
+        - 3
+    - path: crates/scrat-core/src/detect/mod.rs
+      commits: 6
+      authors: 1
+      last_touched: 2026-03-27
+      monthly_commits:
+        - 0
+        - 0
+        - 0
+        - 0
+        - 0
+        - 0
+        - 0
+        - 0
+        - 0
+        - 0
+        - 4
+        - 2
+    - path: config/scrat.toml.example
+      commits: 6
+      authors: 1
+      last_touched: 2026-03-27
+      monthly_commits:
+        - 0
+        - 0
+        - 0
+        - 0
+        - 0
+        - 0
+        - 0
+        - 0
+        - 0
+        - 0
+        - 5
+        - 1
+  recent_activity:
+    total_commits: 36
+    active_authors: 1
+    files_changed: 170
+testing:
+  runner: just
+  command: just test
+  sources:
+    - .config/scrat.toml
+  notes: "`.config/nextest.toml` is present — the wrapper command likely invokes `cargo nextest run`.
+    Do not invoke `cargo test` directly: env-mutating tests assume nextest process isolation."
