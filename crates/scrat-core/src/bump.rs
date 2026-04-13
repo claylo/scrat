@@ -44,10 +44,6 @@ pub enum BumpError {
     #[error("no bump tool available (install cargo-edit for Rust)")]
     NoBumpTool,
 
-    /// Ecosystem not supported for bump operations.
-    #[error("bump not yet supported for {0} ecosystem")]
-    UnsupportedEcosystem(Ecosystem),
-
     /// Project detection failed.
     #[error("project detection failed: {0}")]
     Detection(String),
@@ -779,12 +775,6 @@ mod tests {
     fn bump_error_no_bump_tool_display() {
         let err = BumpError::NoBumpTool;
         assert!(err.to_string().contains("no bump tool available"));
-    }
-
-    #[test]
-    fn bump_error_unsupported_ecosystem_display() {
-        let err = BumpError::UnsupportedEcosystem(Ecosystem::Node);
-        assert!(err.to_string().contains("node"));
     }
 
     #[test]

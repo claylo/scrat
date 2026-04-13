@@ -67,12 +67,9 @@ cliff_config = "/path/to/cliff.toml"
 
 [commands]
 test = "cargo nextest run"
-build = "cargo build --release"
 publish = "cargo publish"
-clean = "cargo clean"
 
 [release]
-changelog_tool = "git-cliff"
 github_release = true               # set false to skip GitHub release creation entirely
 assets = ["dist/{repo}-{tag}.png"]  # paths support {var} interpolation
 notes_template = "/path/to/template.tera"

@@ -2,12 +2,12 @@
 audit: 2026-04-12-workspace-crates
 last_updated: 2026-04-12
 status:
-  fixed: 2
+  fixed: 7
   mitigated: 0
   accepted: 0
   disputed: 0
   deferred: 0
-  open: 17
+  open: 12
 ---
 
 # Actions Taken: scrat 2026-04-12 Workspace Crates Audit
@@ -94,5 +94,73 @@ Two new error variants added to `NotesError`:
   - `scrat notes` (no `--from`): uses `v0.1.2..HEAD --tag vunreleased`
   - `scrat notes --from v0.1.0 --version 0.1.1`: uses `v0.1.0..v0.1.1` (historical)
   - `scrat notes --version 0.2.0`: uses `v0.1.2..HEAD --tag v0.2.0` (upcoming)
+
+---
+
+## 2026-04-12 — audit cleanup bundle
+
+**Disposition:** fixed
+**Addresses:**
+[orphan-commands-build-and-clean-config](README.md#orphan-commands-build-and-clean-config) (advisory),
+[orphan-release-changelog-tool-config](README.md#orphan-release-changelog-tool-config) (advisory),
+[release-profile-missing-lto-and-strip](README.md#release-profile-missing-lto-and-strip) (advisory),
+[bump-error-unsupported-ecosystem-dead-variant](README.md#bump-error-unsupported-ecosystem-dead-variant) (note),
+[example-config-missing-filter-prefix-docs](README.md#example-config-missing-filter-prefix-docs) (note)
+**Commit:** _(see PR linked from front matter once merged)_
+**Author:** @claylo
+
+Bundled trivial cleanup on `fix/audit-cleanup-bundle-a`. Five findings, all
+independent, all trivial in isolation — one PR keeps the change-review cost
+proportional to the work. Test suite runs 593/593 green (one bump-error
+display test was removed alongside its variant), clippy clean.
+
+### Config surface — deletion wins
+
+Three documented config fields had no implementation behind them and no
+roadmap item waiting. Deletion is the honest fix. Serde's default behavior
+(no `deny_unknown_fields`) means removing the fields is a silent,
+backwards-compatible change: if a user already has `[commands] build = "..."`
+or `[release] changelog_tool = "git-cliff"` in their config, the field is
+ignored after the removal just as it was ignored before.
+
+- `CommandsConfig.build` and `CommandsConfig.clean` — removed. `test` and
+  `publish` remain (both wired through `run_test_phase` / `run_publish_phase`).
+- `ReleaseConfig.changelog_tool` — removed. `ChangelogTool` as a concept
+  stays; it lives on `DetectedTools.changelog_tool`, derived from
+  `version_strategy.changelog_tool()` per ecosystem driver.
+- Updated three tests in `config.rs` that asserted on the deleted fields.
+- Removed `build`/`clean`/`changelog_tool` references from
+  `config/scrat.toml.example`, `config/scrat.yaml.example`,
+  `docs/agent-guide.md`, `docs/getting-started.md`, and `README.md`.
+
+### Dead variant
+
+`BumpError::UnsupportedEcosystem(Ecosystem)` was constructed only by a
+display-smoke unit test. Every ecosystem driver's `bump_version_files` now
+returns real behavior or `Ok(Vec::new())` (Go, Swift, Generic). Variant
+removed along with its test.
+
+### Filter hook docs
+
+Added a `filter:` paragraph to `config/scrat.toml.example` alongside the
+existing `sync:` documentation. Now the canonical example config matches
+README's framing of `filter:` as a first-class hook prefix.
+
+### Release profile
+
+Added `lto = "thin"`, `codegen-units = 1`, `strip = "symbols"` to
+`[profile.release]`. Thin LTO enables cross-crate inlining between `scrat`
+and `scrat_core`, which matters under scrat's thin-CLI architecture. The
+`codegen-units = 1` setting maximizes inlining at the cost of release
+build time — comment in the TOML notes this is the first knob to drop if
+build time becomes noticeable. No benchmark run yet; `hyperfine --warmup 3
+'scrat --version'` before/after is a follow-up measurement.
+
+### Verification
+
+- `just test`: 593/593 passed (one test removed alongside the
+  `UnsupportedEcosystem` variant)
+- `just clippy`: 0 warnings
+- `cargo fmt --all`: clean
 
 ---
