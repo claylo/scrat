@@ -2,12 +2,12 @@
 audit: 2026-04-12-workspace-crates
 last_updated: 2026-04-12
 status:
-  fixed: 7
+  fixed: 10
   mitigated: 0
   accepted: 0
   disputed: 0
   deferred: 0
-  open: 12
+  open: 9
 ---
 
 # Actions Taken: scrat 2026-04-12 Workspace Crates Audit
@@ -162,5 +162,72 @@ build time becomes noticeable. No benchmark run yet; `hyperfine --warmup 3
   `UnsupportedEcosystem` variant)
 - `just clippy`: 0 warnings
 - `cargo fmt --all`: clean
+
+---
+
+## 2026-04-12 — supply chain hardening
+
+**Disposition:** fixed
+**Addresses:**
+[serde-saphyr-caret-on-zero-zero-x](README.md#serde-saphyr-caret-on-zero-zero-x) (advisory),
+[ci-lacks-yanked-and-unmaintained-hardening](README.md#ci-lacks-yanked-and-unmaintained-hardening) (advisory),
+[owo-colors-pulls-duplicate-supports-color](README.md#owo-colors-pulls-duplicate-supports-color) (note)
+**Commit:** _(see PR linked from front matter once merged)_
+**Author:** @claylo
+
+Supply-chain Bundle B on `fix/audit-cleanup-bundle-b`. Three findings, one
+theme: harden what cargo-deny considers blocking before the next 2 AM yank
+has to be caught by a human reading CI logs.
+
+### serde-saphyr pin
+
+`serde-saphyr = "0.0"` accepted any 0.0.x version at `cargo install scrat`
+time — and every 0.0.x patch can be breaking per semver convention.
+Pinned to `"~0.0.23"` (current lockfile version) in both
+`crates/scrat-core/Cargo.toml` and `crates/scrat/Cargo.toml`. Bump
+explicitly when a new 0.0.x is vetted.
+
+### cargo-deny advisory gates
+
+Added to `[advisories]` in `.config/deny.toml`:
+
+- `yanked = "deny"` — post-merge yank of a pinned dep now fails CI.
+- `unmaintained = "all"` — RustSec `unmaintained` flag on any workspace
+  or transitive dep fails CI.
+
+**Note on schema drift:** the audit's original recommendation was
+`unmaintained = "deny"` and `vulnerability = "deny"`. Those were the
+pre-0.14 cargo-deny schema. The current (0.19.1) schema treats
+`unmaintained` as a scope selector (`all`/`workspace`/`transitive`/`none`)
+and removed the `vulnerability` key entirely — vulnerability advisories
+are always hard errors now, no opt-in required. Comment in the TOML
+records this.
+
+### supports-color skip
+
+Added documented skip entry in `[bans]` for `supports-color`. cargo-deny
+was reporting a spurious duplicate-version warning driven by upstream
+`owo-colors 4.3`'s intentional dual-dep (`supports-color 3.0` +
+`supports-color 2.0` via package rename). No dedup path without losing
+terminal auto-detect — the skip silences noise without hiding
+consequential duplicates (getrandom, r-efi remain visible as warnings,
+matching their audit note-level findings).
+
+### Template-scope caveat
+
+`ci-lacks-yanked-and-unmaintained-hardening` and possibly
+`serde-saphyr-caret-on-zero-zero-x` originate in the claylo-rs template,
+not scrat alone. Fixing in scrat closes the findings for this project;
+promoting the same changes into `~/source/claylo/claylo-rs` is a
+follow-up that closes the findings across every descendant tool.
+
+### Verification
+
+- `just deny`: `advisories ok, bans ok, licenses ok, sources ok` — the
+  only remaining duplicate warnings are `getrandom` and `r-efi`, both
+  tracked as separate note-level findings.
+- `just test`: 593/593 passed
+- `just clippy`: 0 warnings
+- `cargo fmt --all --check`: clean
 
 ---
