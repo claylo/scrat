@@ -2,12 +2,12 @@
 audit: 2026-04-12-workspace-crates
 last_updated: 2026-04-12
 status:
-  fixed: 10
+  fixed: 12
   mitigated: 0
   accepted: 0
   disputed: 0
   deferred: 0
-  open: 9
+  open: 7
 ---
 
 # Actions Taken: scrat 2026-04-12 Workspace Crates Audit
@@ -229,5 +229,57 @@ follow-up that closes the findings across every descendant tool.
 - `just test`: 593/593 passed
 - `just clippy`: 0 warnings
 - `cargo fmt --all --check`: clean
+
+---
+
+## 2026-04-12 — pipeline efficiency (Bundle C)
+
+**Disposition:** fixed
+**Addresses:**
+[redundant-git-current-branch-per-ship](README.md#redundant-git-current-branch-per-ship) (advisory),
+[has-binary-path-probe-not-cached](README.md#has-binary-path-probe-not-cached) (note)
+**Commit:** _(see PR linked from front matter once merged)_
+**Author:** @claylo
+
+Two independent efficiency wins in one PR on `fix/audit-cleanup-bundle-c`.
+
+### has_binary PATH probe cache
+
+`detect::has_binary` is called ~10 times across a single `scrat ship` run
+(detection + preflight + version planning + gh auth), each invocation
+walking PATH via `which::which`. Added a process-lifetime cache with
+`OnceLock<Mutex<HashMap<String, bool>>>` so each binary is probed at most
+once per process. ~10-15ms saved per ship on macOS.
+
+A `#[cfg(test)] clear_path_cache()` escape hatch is available for any test
+that installs or uninstalls a binary during a test run — no current test
+needed it, but the hook exists for when one does.
+
+### Current-branch threading
+
+Before: `git rev-parse --abbrev-ref HEAD` ran twice per ship — once in
+preflight's `check_release_branch`, once again in `ReadyShip::execute`
+when building `PipelineContext`. The branch cannot change between plan
+and execute within one process, so the second call was pure waste.
+
+Hoisted the resolution: `run_preflight_with_detection` now calls
+`git::current_branch()` once, feeds the result into `check_release_branch`,
+and stores it on `PreflightReport.branch`. `plan_ship` threads that
+value into `ReadyShip.branch` and `InteractiveShip.branch`.
+`ReadyShip::execute` reads `self.branch.clone()` instead of re-forking
+git. Net: one `git rev-parse` per ship run, down from two.
+
+`PreflightReport` gains a public `branch: Option<String>` field with
+`#[serde(skip_serializing_if = "Option::is_none")]` — backwards-
+compatible for `scrat preflight --json` consumers (existing keys
+unchanged, new field only appears when a branch is present).
+
+### Verification
+
+- `just test`: 593/593 passed
+- `just clippy`: 0 warnings
+- `cargo fmt --all --check`: clean
+- `cargo build --lib`: compiles after schema changes to `PreflightReport`,
+  `ReadyShip`, `InteractiveShip`
 
 ---

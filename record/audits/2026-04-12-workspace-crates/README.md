@@ -867,9 +867,9 @@ disposition details.
 | ✅ | [owo-colors-pulls-duplicate-supports-color](#owo-colors-pulls-duplicate-supports-color) | note | `crates/scrat/Cargo.toml:49` | trivial | related: [transitive-getrandom-triplicate](#transitive-getrandom-triplicate) |
 | ⏳ | [transitive-getrandom-triplicate](#transitive-getrandom-triplicate) | note | `Cargo.lock:477-513` | small | related: [owo-colors-pulls-duplicate-supports-color](#owo-colors-pulls-duplicate-supports-color) |
 | | **The Pipeline Efficiency Surface** | | | | |
-| ⏳ | [redundant-git-current-branch-per-ship](#redundant-git-current-branch-per-ship) | advisory | `crates/scrat-core/src/preflight.rs:188-198` | small | related: [has-binary-path-probe-not-cached](#has-binary-path-probe-not-cached) |
+| ✅ | [redundant-git-current-branch-per-ship](#redundant-git-current-branch-per-ship) | advisory | `crates/scrat-core/src/preflight.rs:188-198` | small | related: [has-binary-path-probe-not-cached](#has-binary-path-probe-not-cached) |
 | ✅ | [release-profile-missing-lto-and-strip](#release-profile-missing-lto-and-strip) | advisory | `Cargo.toml:57-59` | trivial | — |
-| ⏳ | [has-binary-path-probe-not-cached](#has-binary-path-probe-not-cached) | note | `crates/scrat-core/src/detect.rs:131-134` | small | related: [redundant-git-current-branch-per-ship](#redundant-git-current-branch-per-ship) |
+| ✅ | [has-binary-path-probe-not-cached](#has-binary-path-probe-not-cached) | note | `crates/scrat-core/src/detect.rs:131-134` | small | related: [redundant-git-current-branch-per-ship](#redundant-git-current-branch-per-ship) |
 | | **The Feature Completeness Surface** | | | | |
 | ✅ | [notes-from-flag-ignored-by-cliff-context](#notes-from-flag-ignored-by-cliff-context) | significant | `crates/scrat-core/src/notes.rs:347-371` | small | related: [notes-command-skips-all-hooks](#notes-command-skips-all-hooks) |
 | ✅ | [notes-command-skips-all-hooks](#notes-command-skips-all-hooks) | advisory | `crates/scrat-core/src/notes.rs:158-175` | small | enabled by: [notes-from-flag-ignored-by-cliff-context](#notes-from-flag-ignored-by-cliff-context) |
