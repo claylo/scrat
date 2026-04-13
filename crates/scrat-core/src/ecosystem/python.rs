@@ -64,9 +64,9 @@ impl EcosystemDriver for PythonDriver {
         }
 
         std::fs::write(&pyproject_path, lines.join("\n") + "\n").map_err(|e| {
-            BumpError::ToolFailed {
+            BumpError::ToolIo {
                 tool: "pyproject.toml".into(),
-                message: format!("failed to write: {e}"),
+                source: e,
             }
         })?;
 

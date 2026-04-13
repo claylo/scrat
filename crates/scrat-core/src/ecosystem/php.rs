@@ -31,9 +31,9 @@ impl EcosystemDriver for PhpDriver {
         };
 
         let mut parsed: serde_json::Value =
-            serde_json::from_str(&content).map_err(|e| BumpError::ToolFailed {
+            serde_json::from_str(&content).map_err(|e| BumpError::ToolParse {
                 tool: "composer.json".into(),
-                message: format!("failed to parse: {e}"),
+                source: Box::new(e),
             })?;
 
         // Only write if the field already exists — don't add it if absent
@@ -43,17 +43,16 @@ impl EcosystemDriver for PhpDriver {
 
         parsed["version"] = serde_json::Value::String(version.to_string());
 
-        let output = serde_json::to_string_pretty(&parsed).map_err(|e| BumpError::ToolFailed {
-            tool: "composer.json".into(),
-            message: format!("failed to serialize: {e}"),
-        })?;
+        let output =
+            serde_json::to_string_pretty(&parsed).map_err(|e| BumpError::ToolSerialize {
+                tool: "composer.json".into(),
+                source: Box::new(e),
+            })?;
 
         // Composer convention: trailing newline
-        std::fs::write(&composer_path, format!("{output}\n")).map_err(|e| {
-            BumpError::ToolFailed {
-                tool: "composer.json".into(),
-                message: format!("failed to write: {e}"),
-            }
+        std::fs::write(&composer_path, format!("{output}\n")).map_err(|e| BumpError::ToolIo {
+            tool: "composer.json".into(),
+            source: e,
         })?;
 
         debug!(%version, "bumped composer.json version");
