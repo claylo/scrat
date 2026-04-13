@@ -40,7 +40,7 @@ pkg-url = "{ repo }/releases/download/v{ version }/{ name }-{ version }-{ target
 pkg-fmt = "zip"
 
 [dependencies]
-scrat-core = { version = "0.1", path = "../scrat-core" }
+scrat-core = { version = "0.1", path = "../scrat-core", features = ["cli"] }
 clap = { version = "4.6", features = ["derive"] }
 anyhow = "1.0"
 tracing = "0.1"

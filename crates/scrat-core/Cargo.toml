@@ -27,10 +27,15 @@ exclude = [
     "/*.example",
 ]
 
+[features]
+# Enable clap::ValueEnum derives on public enums (e.g. ConfigFormat, ConfigStyle).
+# Opt-in so library consumers that don't build a CLI don't pull clap transitively.
+cli = ["dep:clap"]
+
 [dependencies]
 anyhow = "1.0"
 camino = { version = "1.2", features = ["serde1"] }
-clap = { version = "4.6", features = ["derive"] }
+clap = { version = "4.6", features = ["derive"], optional = true }
 directories = "6.0"
 figment = { version = "0.10", features = ["toml", "json"] }
 serde-saphyr = { version = "~0.0.23", features = ["figment"] }
