@@ -227,6 +227,12 @@ jobs:
     env:
       VERSION: ${{ needs.publish-binaries.outputs.version }}
     steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          sparse-checkout: .github/formula.rb.tmpl
+          sparse-checkout-cone-mode: false
+
       - name: Download SHA256 checksums
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -237,25 +243,19 @@ jobs:
             --dir checksums \
             --repo "${{ github.repository }}"
 
-      - name: Checkout
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-        with:
-          sparse-checkout: .github/formula.rb.tmpl
-          sparse-checkout-cone-mode: false
-
       - name: Generate formula
         run: |
           get_sha() {
             local target="$1"
             local file="checksums/${PROJECT_NAME}-${VERSION}-${target}.tar.gz.sha256"
             if [[ ! -f "$file" ]]; then
-              echo "::error::Missing checksum file: $file"
+              echo "::error::Missing checksum file: $file" >&2
               return 1
             fi
             local sha
             sha=$(awk '{print $1}' "$file")
             if [[ -z "$sha" || ${#sha} -ne 64 ]]; then
-              echo "::error::Invalid SHA256 in $file: '$sha'"
+              echo "::error::Invalid SHA256 in $file: '$sha'" >&2
               return 1
             fi
             echo "$sha"
