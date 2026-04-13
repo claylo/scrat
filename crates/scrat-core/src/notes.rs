@@ -15,7 +15,8 @@ use serde::Serialize;
 use thiserror::Error;
 use tracing::{debug, warn};
 
-use crate::config::Config;
+use crate::config::{Config, HooksConfig};
+use crate::hooks::{self, HookError};
 use crate::pipeline::{PipelineContext, PipelineContextInit};
 use crate::{deps, detect, git, stats, version};
 
@@ -37,6 +38,19 @@ pub enum NotesError {
         path: String,
         /// The underlying I/O error.
         source: std::io::Error,
+    },
+
+    /// A preview hook failed to run.
+    #[error("preview hook failed")]
+    HookExecution(#[from] HookError),
+
+    /// Failed to serialize or deserialize the pipeline context around a filter hook.
+    #[error("pipeline context {direction}: {source}")]
+    ContextSerde {
+        /// Which direction failed — `"serialize"` before the filter or `"deserialize"` after.
+        direction: &'static str,
+        /// The underlying JSON error.
+        source: serde_json::Error,
     },
 }
 
@@ -163,6 +177,10 @@ pub fn preview_notes(
         }
     }
 
+    // Run preview-relevant hooks (currently post_bump — it's the ship-phase hook
+    // immediately before render_notes, and where filter: hooks would shape notes).
+    apply_preview_hooks(&mut ctx, config.hooks.as_ref(), project_root)?;
+
     // Determine template: options > config > built-in
     let template = options.template.as_deref().or_else(|| {
         config
@@ -180,6 +198,59 @@ pub fn preview_notes(
         previous_tag,
         tag,
     })
+}
+
+/// Run preview-relevant hooks (`post_bump` filter hooks) and apply mutations to `ctx`.
+///
+/// Keeps `scrat notes` aligned with what `scrat ship` will produce: `post_bump`
+/// is the last ship-phase before the notes render, and `filter:` hooks there
+/// reshape the pipeline context (injecting postcards, quotes, custom metadata).
+///
+/// Only `filter:` hooks are executed in preview — parallel and `sync:` hooks
+/// are skipped because they typically have real side effects (generating
+/// artifacts, uploading files) that shouldn't fire during a read-only preview.
+/// Filter hooks are pure transformations of pipeline JSON, so they're safe.
+///
+/// No-op when `hooks_config` is `None`, `post_bump` is unset, or no `filter:`
+/// hooks are configured in `post_bump`.
+fn apply_preview_hooks(
+    ctx: &mut PipelineContext,
+    hooks_config: Option<&HooksConfig>,
+    project_root: &Utf8Path,
+) -> Result<(), NotesError> {
+    let Some(cmds) = hooks_config.and_then(|h| h.post_bump.as_deref()) else {
+        return Ok(());
+    };
+    // Keep only filter: hooks — side-effecting hooks don't belong in preview.
+    let filter_only: Vec<String> = cmds
+        .iter()
+        .filter(|c| c.trim_start().starts_with("filter:"))
+        .cloned()
+        .collect();
+    if filter_only.is_empty() {
+        return Ok(());
+    }
+
+    let hook_ctx = ctx.hook_context();
+    let pipeline_json = serde_json::to_string(&*ctx).map_err(|e| NotesError::ContextSerde {
+        direction: "serialize",
+        source: e,
+    })?;
+
+    debug!(
+        count = filter_only.len(),
+        "running preview post_bump filter hooks"
+    );
+    let output = hooks::run_hooks(&filter_only, &hook_ctx, project_root, Some(&pipeline_json))?;
+
+    if let Some(filter_json) = output.filter_output {
+        *ctx = serde_json::from_str(&filter_json).map_err(|e| NotesError::ContextSerde {
+            direction: "deserialize",
+            source: e,
+        })?;
+    }
+
+    Ok(())
 }
 
 /// Read the current version from project manifest files.
@@ -269,7 +340,17 @@ pub fn render_notes(
 ) -> Result<String, NotesError> {
     // Pass 1: Extract git-cliff's native context as JSON
     debug!("extracting git-cliff context (pass 1)");
-    let context_json = run_cliff_context(project_root)?;
+    // Figure out whether the target tag already exists in git. If it does,
+    // the user is regenerating historical notes and we need a concrete range;
+    // otherwise this is an upcoming release and we use --tag with ..HEAD.
+    let target_tag_exists = if ctx.tag.is_empty() {
+        false
+    } else {
+        git::tag_exists(&ctx.tag).unwrap_or(false)
+    };
+    let args = cliff_context_args(&ctx.previous_tag, &ctx.tag, target_tag_exists);
+    debug!(?args, "git-cliff context args");
+    let context_json = run_cliff_context(project_root, &args)?;
 
     // Parse and inject our extra data
     let enriched_json = inject_extra(&context_json, ctx)?;
@@ -344,10 +425,49 @@ pub fn build_extra(ctx: &PipelineContext) -> serde_json::Value {
     serde_json::Value::Object(extra)
 }
 
-/// Run `git-cliff --unreleased --context` and capture JSON output.
-fn run_cliff_context(project_root: &Utf8Path) -> Result<String, NotesError> {
+/// Construct git-cliff context-extraction args for a given tag range.
+///
+/// Four scenarios:
+/// - No prior tag and no target tag → `--unreleased` (bare).
+/// - No prior tag, target specified → `--unreleased --tag <target>` (label the section).
+/// - Prior tag, target doesn't exist yet → `<prev>..HEAD --tag <target>` (upcoming release).
+/// - Prior tag, target already tagged → `<prev>..<target>` (historical regen).
+///
+/// `--context` is always the final arg (switches git-cliff to JSON-context mode).
+fn cliff_context_args(
+    previous_tag: &str,
+    target_tag: &str,
+    target_tag_exists: bool,
+) -> Vec<String> {
+    let mut args = Vec::new();
+
+    if previous_tag.is_empty() {
+        // No prior tag — everything so far is unreleased.
+        args.push("--unreleased".to_string());
+        if !target_tag.is_empty() && !target_tag_exists {
+            args.push("--tag".to_string());
+            args.push(target_tag.to_string());
+        }
+    } else if target_tag_exists {
+        // Historical regeneration: both endpoints exist in git.
+        args.push(format!("{previous_tag}..{target_tag}"));
+    } else {
+        // Upcoming release: range to HEAD, labeled with the new tag.
+        args.push(format!("{previous_tag}..HEAD"));
+        if !target_tag.is_empty() {
+            args.push("--tag".to_string());
+            args.push(target_tag.to_string());
+        }
+    }
+
+    args.push("--context".to_string());
+    args
+}
+
+/// Run `git-cliff` context extraction with the provided args and capture JSON output.
+fn run_cliff_context(project_root: &Utf8Path, args: &[String]) -> Result<String, NotesError> {
     let output = Command::new("git-cliff")
-        .args(["--unreleased", "--context"])
+        .args(args)
         .current_dir(project_root.as_std_path())
         .output()
         .map_err(|e| NotesError::CliffContext(format!("failed to execute git-cliff: {e}")))?;
@@ -1569,5 +1689,112 @@ mod tests {
         let ctx = test_ctx();
         let extra = build_extra(&ctx);
         assert!(extra.is_object(), "build_extra must return a JSON object");
+    }
+
+    // ──────────────────────────────────────────────
+    // cliff_context_args: arg construction per range scenario
+    // ──────────────────────────────────────────────
+
+    #[test]
+    fn cliff_context_args_no_previous_or_target() {
+        // No prior tag and no target — bare unreleased (first release, version unknown).
+        let args = cliff_context_args("", "", false);
+        assert_eq!(args, vec!["--unreleased", "--context"]);
+    }
+
+    #[test]
+    fn cliff_context_args_first_release_with_target_tag() {
+        // No prior tag, but we know the target — label the unreleased section.
+        let args = cliff_context_args("", "v1.0.0", false);
+        assert_eq!(args, vec!["--unreleased", "--tag", "v1.0.0", "--context"]);
+    }
+
+    #[test]
+    fn cliff_context_args_upcoming_release() {
+        // Have a prior tag, target doesn't exist yet — range to HEAD + label.
+        let args = cliff_context_args("v1.0.0", "v1.1.0", false);
+        assert_eq!(args, vec!["v1.0.0..HEAD", "--tag", "v1.1.0", "--context"]);
+    }
+
+    #[test]
+    fn cliff_context_args_historical_regen() {
+        // Both tags exist in git — pure range, no --tag (git-cliff reads it from the tag).
+        let args = cliff_context_args("v1.0.0", "v1.1.0", true);
+        assert_eq!(args, vec!["v1.0.0..v1.1.0", "--context"]);
+    }
+
+    #[test]
+    fn cliff_context_args_no_v_prefix_tolerated() {
+        // Tag formatting is scrat's decision upstream; this function takes it as-is.
+        let args = cliff_context_args("1.0.0", "1.1.0", false);
+        assert_eq!(args, vec!["1.0.0..HEAD", "--tag", "1.1.0", "--context"]);
+    }
+
+    // ──────────────────────────────────────────────
+    // apply_preview_hooks: threads post_bump hooks through preview ctx
+    // ──────────────────────────────────────────────
+
+    #[test]
+    fn apply_preview_hooks_noop_when_no_config() {
+        let mut ctx = test_ctx();
+        let tmp = tempfile::TempDir::new().unwrap();
+        let root = camino::Utf8Path::from_path(tmp.path()).unwrap();
+        apply_preview_hooks(&mut ctx, None, root).unwrap();
+        assert_eq!(ctx.version, "1.2.3");
+    }
+
+    #[test]
+    fn apply_preview_hooks_noop_when_no_post_bump() {
+        let mut ctx = test_ctx();
+        let tmp = tempfile::TempDir::new().unwrap();
+        let root = camino::Utf8Path::from_path(tmp.path()).unwrap();
+        let hooks = crate::config::HooksConfig::default();
+        apply_preview_hooks(&mut ctx, Some(&hooks), root).unwrap();
+        assert_eq!(ctx.version, "1.2.3");
+    }
+
+    #[test]
+    fn apply_preview_hooks_skips_non_filter_commands() {
+        let mut ctx = test_ctx();
+        let tmp = tempfile::TempDir::new().unwrap();
+        let root = camino::Utf8Path::from_path(tmp.path()).unwrap();
+        // `false` would fail if executed, but non-filter hooks are skipped in preview.
+        let hooks = crate::config::HooksConfig {
+            post_bump: Some(vec!["false".into(), "sync:false".into()]),
+            ..Default::default()
+        };
+        apply_preview_hooks(&mut ctx, Some(&hooks), root).unwrap();
+        assert_eq!(ctx.version, "1.2.3");
+    }
+
+    #[test]
+    fn apply_preview_hooks_mixed_runs_only_filters() {
+        let mut ctx = test_ctx();
+        let tmp = tempfile::TempDir::new().unwrap();
+        let root = camino::Utf8Path::from_path(tmp.path()).unwrap();
+        // Mixed list: `false` would fail, `filter: cat` is a passthrough.
+        let hooks = crate::config::HooksConfig {
+            post_bump: Some(vec!["false".into(), "filter: cat".into(), "false".into()]),
+            ..Default::default()
+        };
+        apply_preview_hooks(&mut ctx, Some(&hooks), root).unwrap();
+        assert_eq!(ctx.version, "1.2.3");
+    }
+
+    #[test]
+    fn apply_preview_hooks_filter_passthrough_preserves_ctx() {
+        let mut ctx = test_ctx();
+        ctx.metadata
+            .insert("marker".into(), serde_json::json!("keep-me"));
+        let tmp = tempfile::TempDir::new().unwrap();
+        let root = camino::Utf8Path::from_path(tmp.path()).unwrap();
+        // `cat` is identity: ctx round-trips via JSON through the filter.
+        let hooks = crate::config::HooksConfig {
+            post_bump: Some(vec!["filter: cat".into()]),
+            ..Default::default()
+        };
+        apply_preview_hooks(&mut ctx, Some(&hooks), root).unwrap();
+        assert_eq!(ctx.version, "1.2.3");
+        assert_eq!(ctx.metadata["marker"], "keep-me");
     }
 }

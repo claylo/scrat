@@ -850,31 +850,34 @@ should go.*
 
 ## Remediation Ledger
 
-| Finding | Concern | Location | Effort | Chains |
-|---------|---------|----------|--------|--------|
-| **The Error Architecture Surface** | | | | |
-| [notes-error-flattens-source-chain](#notes-error-flattens-source-chain) | moderate | `crates/scrat-core/src/notes.rs:22-41` | medium | — |
-| [observability-returns-anyhow-in-library](#observability-returns-anyhow-in-library) | moderate | `crates/scrat-core/src/observability.rs:67-70` | small | — |
-| [observability-writer-silent-discard](#observability-writer-silent-discard) | advisory | `crates/scrat-core/src/observability.rs:196-202` | trivial | — |
-| [expect-messages-describe-value-not-invariant](#expect-messages-describe-value-not-invariant) | advisory | `crates/scrat/src/commands/doctor.rs:112-116` | trivial | — |
-| **The Supply Chain Surface** | | | | |
-| [scrat-core-depends-on-clap-for-value-enum-derives](#scrat-core-depends-on-clap-for-value-enum-derives) | moderate | `crates/scrat-core/Cargo.toml:33` | small | — |
-| [serde-saphyr-caret-on-zero-zero-x](#serde-saphyr-caret-on-zero-zero-x) | advisory | `crates/scrat-core/Cargo.toml:36` | trivial | — |
-| [ci-lacks-yanked-and-unmaintained-hardening](#ci-lacks-yanked-and-unmaintained-hardening) | advisory | `.config/deny.toml:48-55` | trivial | — |
-| [owo-colors-pulls-duplicate-supports-color](#owo-colors-pulls-duplicate-supports-color) | note | `crates/scrat/Cargo.toml:49` | trivial | related: [transitive-getrandom-triplicate](#transitive-getrandom-triplicate) |
-| [transitive-getrandom-triplicate](#transitive-getrandom-triplicate) | note | `Cargo.lock:477-513` | small | related: [owo-colors-pulls-duplicate-supports-color](#owo-colors-pulls-duplicate-supports-color) |
-| **The Pipeline Efficiency Surface** | | | | |
-| [redundant-git-current-branch-per-ship](#redundant-git-current-branch-per-ship) | advisory | `crates/scrat-core/src/preflight.rs:188-198` | small | related: [has-binary-path-probe-not-cached](#has-binary-path-probe-not-cached) |
-| [release-profile-missing-lto-and-strip](#release-profile-missing-lto-and-strip) | advisory | `Cargo.toml:57-59` | trivial | — |
-| [has-binary-path-probe-not-cached](#has-binary-path-probe-not-cached) | note | `crates/scrat-core/src/detect.rs:131-134` | small | related: [redundant-git-current-branch-per-ship](#redundant-git-current-branch-per-ship) |
-| **The Feature Completeness Surface** | | | | |
-| [notes-from-flag-ignored-by-cliff-context](#notes-from-flag-ignored-by-cliff-context) | significant | `crates/scrat-core/src/notes.rs:347-371` | small | related: [notes-command-skips-all-hooks](#notes-command-skips-all-hooks) |
-| [notes-command-skips-all-hooks](#notes-command-skips-all-hooks) | advisory | `crates/scrat-core/src/notes.rs:158-175` | small | enabled by: [notes-from-flag-ignored-by-cliff-context](#notes-from-flag-ignored-by-cliff-context) |
-| [orphan-commands-build-and-clean-config](#orphan-commands-build-and-clean-config) | advisory | `crates/scrat-core/src/config.rs:105-115` | trivial | — |
-| [orphan-release-changelog-tool-config](#orphan-release-changelog-tool-config) | advisory | `crates/scrat-core/src/config.rs:117-121` | trivial | — |
-| [example-config-advertises-unimplemented-otel-and-env](#example-config-advertises-unimplemented-otel-and-env) | note | `config/scrat.toml.example:26-36` | trivial | — |
-| [bump-error-unsupported-ecosystem-dead-variant](#bump-error-unsupported-ecosystem-dead-variant) | note | `crates/scrat-core/src/bump.rs:43-49` | trivial | — |
-| [example-config-missing-filter-prefix-docs](#example-config-missing-filter-prefix-docs) | note | `config/scrat.toml.example:82-92` | trivial | — |
+Status legend: ✅ fixed, ⏳ open. See [actions-taken.md](actions-taken.md) for
+disposition details.
+
+| Status | Finding | Concern | Location | Effort | Chains |
+|--------|---------|---------|----------|--------|--------|
+| | **The Error Architecture Surface** | | | | |
+| ⏳ | [notes-error-flattens-source-chain](#notes-error-flattens-source-chain) | moderate | `crates/scrat-core/src/notes.rs:22-41` | medium | — |
+| ⏳ | [observability-returns-anyhow-in-library](#observability-returns-anyhow-in-library) | moderate | `crates/scrat-core/src/observability.rs:67-70` | small | — |
+| ⏳ | [observability-writer-silent-discard](#observability-writer-silent-discard) | advisory | `crates/scrat-core/src/observability.rs:196-202` | trivial | — |
+| ⏳ | [expect-messages-describe-value-not-invariant](#expect-messages-describe-value-not-invariant) | advisory | `crates/scrat/src/commands/doctor.rs:112-116` | trivial | — |
+| | **The Supply Chain Surface** | | | | |
+| ⏳ | [scrat-core-depends-on-clap-for-value-enum-derives](#scrat-core-depends-on-clap-for-value-enum-derives) | moderate | `crates/scrat-core/Cargo.toml:33` | small | — |
+| ⏳ | [serde-saphyr-caret-on-zero-zero-x](#serde-saphyr-caret-on-zero-zero-x) | advisory | `crates/scrat-core/Cargo.toml:36` | trivial | — |
+| ⏳ | [ci-lacks-yanked-and-unmaintained-hardening](#ci-lacks-yanked-and-unmaintained-hardening) | advisory | `.config/deny.toml:48-55` | trivial | — |
+| ⏳ | [owo-colors-pulls-duplicate-supports-color](#owo-colors-pulls-duplicate-supports-color) | note | `crates/scrat/Cargo.toml:49` | trivial | related: [transitive-getrandom-triplicate](#transitive-getrandom-triplicate) |
+| ⏳ | [transitive-getrandom-triplicate](#transitive-getrandom-triplicate) | note | `Cargo.lock:477-513` | small | related: [owo-colors-pulls-duplicate-supports-color](#owo-colors-pulls-duplicate-supports-color) |
+| | **The Pipeline Efficiency Surface** | | | | |
+| ⏳ | [redundant-git-current-branch-per-ship](#redundant-git-current-branch-per-ship) | advisory | `crates/scrat-core/src/preflight.rs:188-198` | small | related: [has-binary-path-probe-not-cached](#has-binary-path-probe-not-cached) |
+| ⏳ | [release-profile-missing-lto-and-strip](#release-profile-missing-lto-and-strip) | advisory | `Cargo.toml:57-59` | trivial | — |
+| ⏳ | [has-binary-path-probe-not-cached](#has-binary-path-probe-not-cached) | note | `crates/scrat-core/src/detect.rs:131-134` | small | related: [redundant-git-current-branch-per-ship](#redundant-git-current-branch-per-ship) |
+| | **The Feature Completeness Surface** | | | | |
+| ✅ | [notes-from-flag-ignored-by-cliff-context](#notes-from-flag-ignored-by-cliff-context) | significant | `crates/scrat-core/src/notes.rs:347-371` | small | related: [notes-command-skips-all-hooks](#notes-command-skips-all-hooks) |
+| ✅ | [notes-command-skips-all-hooks](#notes-command-skips-all-hooks) | advisory | `crates/scrat-core/src/notes.rs:158-175` | small | enabled by: [notes-from-flag-ignored-by-cliff-context](#notes-from-flag-ignored-by-cliff-context) |
+| ⏳ | [orphan-commands-build-and-clean-config](#orphan-commands-build-and-clean-config) | advisory | `crates/scrat-core/src/config.rs:105-115` | trivial | — |
+| ⏳ | [orphan-release-changelog-tool-config](#orphan-release-changelog-tool-config) | advisory | `crates/scrat-core/src/config.rs:117-121` | trivial | — |
+| ⏳ | [example-config-advertises-unimplemented-otel-and-env](#example-config-advertises-unimplemented-otel-and-env) | note | `config/scrat.toml.example:26-36` | trivial | — |
+| ⏳ | [bump-error-unsupported-ecosystem-dead-variant](#bump-error-unsupported-ecosystem-dead-variant) | note | `crates/scrat-core/src/bump.rs:43-49` | trivial | — |
+| ⏳ | [example-config-missing-filter-prefix-docs](#example-config-missing-filter-prefix-docs) | note | `config/scrat.toml.example:82-92` | trivial | — |
 
 <sub>
 Generated 2026-04-12 at commit 7b2f302.
