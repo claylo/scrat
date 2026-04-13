@@ -31,13 +31,48 @@ use crate::version::{self, conventional, explicit, interactive};
 /// Errors from bump operations.
 #[derive(Error, Debug)]
 pub enum BumpError {
-    /// A shell command failed during the bump.
+    /// A bump operation failed without an underlying Rust error to preserve —
+    /// e.g. a shell tool exited non-zero (stderr captured) or a pre-condition
+    /// check on the project state was violated.
     #[error("{tool} failed: {message}")]
     ToolFailed {
-        /// Tool name.
+        /// Tool name (manifest path or shell binary).
         tool: String,
         /// Error details.
         message: String,
+    },
+
+    /// I/O failure while reading or writing a manifest, lockfile, or
+    /// version file.
+    #[error("{tool}: I/O error")]
+    ToolIo {
+        /// Tool name (typically the file path).
+        tool: String,
+        /// The underlying I/O error.
+        #[source]
+        source: std::io::Error,
+    },
+
+    /// Failed to parse a manifest, lockfile, or pattern. Uses a boxed
+    /// source so JSON, YAML, TOML, and glob parser errors can share a
+    /// single variant while preserving `Error::source()`.
+    #[error("{tool}: parse error")]
+    ToolParse {
+        /// Tool name (typically the file path or pattern).
+        tool: String,
+        /// The underlying parse error.
+        #[source]
+        source: Box<dyn std::error::Error + Send + Sync + 'static>,
+    },
+
+    /// Failed to serialize a manifest or lockfile back out after editing.
+    #[error("{tool}: serialize error")]
+    ToolSerialize {
+        /// Tool name (typically the file path).
+        tool: String,
+        /// The underlying serializer error.
+        #[source]
+        source: Box<dyn std::error::Error + Send + Sync + 'static>,
     },
 
     /// No bump tool available for this ecosystem.
@@ -351,9 +386,9 @@ fn generate_changelog(
                 .arg(format!("v{version}"))
                 .current_dir(project_root.as_std_path())
                 .output()
-                .map_err(|e| BumpError::ToolFailed {
+                .map_err(|e| BumpError::ToolIo {
                     tool: "git-cliff".into(),
-                    message: format!("failed to execute: {e}"),
+                    source: e,
                 })?;
 
             if !output.status.success() {
@@ -781,6 +816,51 @@ mod tests {
     fn bump_error_detection_display() {
         let err = BumpError::Detection("could not detect".into());
         assert!(err.to_string().contains("could not detect"));
+    }
+
+    // ── BumpError: source() chain preservation ────────────
+
+    #[test]
+    fn tool_io_preserves_io_source() {
+        use std::error::Error;
+        let err = BumpError::ToolIo {
+            tool: "package.json".into(),
+            source: std::io::Error::new(std::io::ErrorKind::PermissionDenied, "denied"),
+        };
+        assert!(err.to_string().contains("package.json"));
+        let source = err.source().expect("ToolIo must expose io::Error source");
+        assert!(source.to_string().contains("denied"));
+    }
+
+    #[test]
+    fn tool_parse_preserves_boxed_source() {
+        use std::error::Error;
+        let json_err = serde_json::from_str::<serde_json::Value>("{ broken").unwrap_err();
+        let err = BumpError::ToolParse {
+            tool: "Cargo.toml".into(),
+            source: Box::new(json_err),
+        };
+        assert!(err.to_string().contains("Cargo.toml"));
+        assert!(
+            err.source().is_some(),
+            "ToolParse must expose its boxed source"
+        );
+    }
+
+    #[test]
+    fn tool_serialize_preserves_boxed_source() {
+        use std::error::Error;
+        // Construct any serde_json error to feed in as a stand-in serializer error.
+        let json_err = serde_json::from_str::<serde_json::Value>("totally invalid").unwrap_err();
+        let err = BumpError::ToolSerialize {
+            tool: "package.json".into(),
+            source: Box::new(json_err),
+        };
+        assert!(err.to_string().contains("package.json"));
+        assert!(
+            err.source().is_some(),
+            "ToolSerialize must expose its boxed source"
+        );
     }
 
     // ── ReadyBump fields ────────────────────────────────────

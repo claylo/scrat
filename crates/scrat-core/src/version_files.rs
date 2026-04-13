@@ -69,15 +69,15 @@ fn apply_dot_path_json(
 }
 
 fn update_json(path: &Utf8Path, dot_paths: &[&str], version: &str) -> BumpResult<bool> {
-    let content = std::fs::read_to_string(path).map_err(|e| BumpError::ToolFailed {
+    let content = std::fs::read_to_string(path).map_err(|e| BumpError::ToolIo {
         tool: path.to_string(),
-        message: format!("failed to read: {e}"),
+        source: e,
     })?;
 
     let mut parsed: serde_json::Value =
-        serde_json::from_str(&content).map_err(|e| BumpError::ToolFailed {
+        serde_json::from_str(&content).map_err(|e| BumpError::ToolParse {
             tool: path.to_string(),
-            message: format!("failed to parse JSON: {e}"),
+            source: Box::new(e),
         })?;
 
     let mut any_modified = false;
@@ -89,13 +89,14 @@ fn update_json(path: &Utf8Path, dot_paths: &[&str], version: &str) -> BumpResult
     }
 
     if any_modified {
-        let output = serde_json::to_string_pretty(&parsed).map_err(|e| BumpError::ToolFailed {
+        let output =
+            serde_json::to_string_pretty(&parsed).map_err(|e| BumpError::ToolSerialize {
+                tool: path.to_string(),
+                source: Box::new(e),
+            })?;
+        std::fs::write(path, format!("{output}\n")).map_err(|e| BumpError::ToolIo {
             tool: path.to_string(),
-            message: format!("failed to serialize JSON: {e}"),
-        })?;
-        std::fs::write(path, format!("{output}\n")).map_err(|e| BumpError::ToolFailed {
-            tool: path.to_string(),
-            message: format!("failed to write: {e}"),
+            source: e,
         })?;
         debug!(%version, %path, "updated JSON version file");
     }
@@ -110,15 +111,15 @@ fn update_json(path: &Utf8Path, dot_paths: &[&str], version: &str) -> BumpResult
 /// YAML has no `Value` type in serde-saphyr, so we deserialize into `serde_json::Value`,
 /// reuse the JSON dot-path walker, and serialize back to YAML.
 fn update_yaml(path: &Utf8Path, dot_paths: &[&str], version: &str) -> BumpResult<bool> {
-    let content = std::fs::read_to_string(path).map_err(|e| BumpError::ToolFailed {
+    let content = std::fs::read_to_string(path).map_err(|e| BumpError::ToolIo {
         tool: path.to_string(),
-        message: format!("failed to read: {e}"),
+        source: e,
     })?;
 
     let mut parsed: serde_json::Value =
-        serde_saphyr::from_str(&content).map_err(|e| BumpError::ToolFailed {
+        serde_saphyr::from_str(&content).map_err(|e| BumpError::ToolParse {
             tool: path.to_string(),
-            message: format!("failed to parse YAML: {e}"),
+            source: Box::new(e),
         })?;
 
     let mut any_modified = false;
@@ -130,13 +131,13 @@ fn update_yaml(path: &Utf8Path, dot_paths: &[&str], version: &str) -> BumpResult
     }
 
     if any_modified {
-        let output = serde_saphyr::to_string(&parsed).map_err(|e| BumpError::ToolFailed {
+        let output = serde_saphyr::to_string(&parsed).map_err(|e| BumpError::ToolSerialize {
             tool: path.to_string(),
-            message: format!("failed to serialize YAML: {e}"),
+            source: Box::new(e),
         })?;
-        std::fs::write(path, &output).map_err(|e| BumpError::ToolFailed {
+        std::fs::write(path, &output).map_err(|e| BumpError::ToolIo {
             tool: path.to_string(),
-            message: format!("failed to write: {e}"),
+            source: e,
         })?;
         debug!(%version, %path, "updated YAML version file");
     }
@@ -204,9 +205,9 @@ fn split_frontmatter(content: &str) -> Option<(FrontmatterDelim, &str, &str)> {
 ///
 /// The body after the closing delimiter is preserved byte-for-byte.
 fn update_frontmatter(path: &Utf8Path, dot_paths: &[&str], version: &str) -> BumpResult<bool> {
-    let content = std::fs::read_to_string(path).map_err(|e| BumpError::ToolFailed {
+    let content = std::fs::read_to_string(path).map_err(|e| BumpError::ToolIo {
         tool: path.to_string(),
-        message: format!("failed to read: {e}"),
+        source: e,
     })?;
 
     let (delim, fm_text, body) = match split_frontmatter(&content) {
@@ -226,9 +227,9 @@ fn update_frontmatter(path: &Utf8Path, dot_paths: &[&str], version: &str) -> Bum
         FrontmatterDelim::Yaml => {
             // Parse YAML frontmatter into serde_json::Value, update, serialize back
             let mut parsed: serde_json::Value =
-                serde_saphyr::from_str(fm_text).map_err(|e| BumpError::ToolFailed {
+                serde_saphyr::from_str(fm_text).map_err(|e| BumpError::ToolParse {
                     tool: path.to_string(),
-                    message: format!("failed to parse YAML frontmatter: {e}"),
+                    source: Box::new(e),
                 })?;
 
             let mut any_modified = false;
@@ -244,9 +245,9 @@ fn update_frontmatter(path: &Utf8Path, dot_paths: &[&str], version: &str) -> Bum
             }
 
             let mut yaml_out =
-                serde_saphyr::to_string(&parsed).map_err(|e| BumpError::ToolFailed {
+                serde_saphyr::to_string(&parsed).map_err(|e| BumpError::ToolSerialize {
                     tool: path.to_string(),
-                    message: format!("failed to serialize YAML frontmatter: {e}"),
+                    source: Box::new(e),
                 })?;
 
             // serde_saphyr::to_string always ends with \n, strip trailing newline
@@ -256,9 +257,9 @@ fn update_frontmatter(path: &Utf8Path, dot_paths: &[&str], version: &str) -> Bum
             }
 
             let output = format!("{marker}\n{yaml_out}\n{marker}\n{body}");
-            std::fs::write(path, output).map_err(|e| BumpError::ToolFailed {
+            std::fs::write(path, output).map_err(|e| BumpError::ToolIo {
                 tool: path.to_string(),
-                message: format!("failed to write: {e}"),
+                source: e,
             })?;
             debug!(%version, %path, "updated YAML frontmatter version");
             Ok(true)
@@ -267,9 +268,9 @@ fn update_frontmatter(path: &Utf8Path, dot_paths: &[&str], version: &str) -> Bum
             // Use toml_edit for format-preserving TOML frontmatter
             let fm_with_newline = format!("{fm_text}\n");
             let mut doc: toml_edit::DocumentMut =
-                fm_with_newline.parse().map_err(|e| BumpError::ToolFailed {
+                fm_with_newline.parse().map_err(|e| BumpError::ToolParse {
                     tool: path.to_string(),
-                    message: format!("failed to parse TOML frontmatter: {e}"),
+                    source: Box::new(e),
                 })?;
 
             let mut any_modified = false;
@@ -294,9 +295,9 @@ fn update_frontmatter(path: &Utf8Path, dot_paths: &[&str], version: &str) -> Bum
             }
 
             let output = format!("{marker}\n{toml_out}\n{marker}\n{body}");
-            std::fs::write(path, output).map_err(|e| BumpError::ToolFailed {
+            std::fs::write(path, output).map_err(|e| BumpError::ToolIo {
                 tool: path.to_string(),
-                message: format!("failed to write: {e}"),
+                source: e,
             })?;
             debug!(%version, %path, "updated TOML frontmatter version");
             Ok(true)
@@ -328,14 +329,14 @@ fn apply_dot_path_toml<'a>(
 }
 
 fn update_toml(path: &Utf8Path, dot_paths: &[&str], version: &str) -> BumpResult<bool> {
-    let content = std::fs::read_to_string(path).map_err(|e| BumpError::ToolFailed {
+    let content = std::fs::read_to_string(path).map_err(|e| BumpError::ToolIo {
         tool: path.to_string(),
-        message: format!("failed to read: {e}"),
+        source: e,
     })?;
 
-    let mut doc: toml_edit::DocumentMut = content.parse().map_err(|e| BumpError::ToolFailed {
+    let mut doc: toml_edit::DocumentMut = content.parse().map_err(|e| BumpError::ToolParse {
         tool: path.to_string(),
-        message: format!("failed to parse TOML: {e}"),
+        source: Box::new(e),
     })?;
 
     let mut any_modified = false;
@@ -350,9 +351,9 @@ fn update_toml(path: &Utf8Path, dot_paths: &[&str], version: &str) -> BumpResult
     }
 
     if any_modified {
-        std::fs::write(path, doc.to_string()).map_err(|e| BumpError::ToolFailed {
+        std::fs::write(path, doc.to_string()).map_err(|e| BumpError::ToolIo {
             tool: path.to_string(),
-            message: format!("failed to write: {e}"),
+            source: e,
         })?;
         debug!(%version, %path, "updated TOML version file");
     }
@@ -365,9 +366,9 @@ fn update_toml(path: &Utf8Path, dot_paths: &[&str], version: &str) -> BumpResult
 // ──────────────────────────────────────────────
 
 fn update_text(path: &Utf8Path, version: &str) -> BumpResult<bool> {
-    std::fs::write(path, format!("{version}\n")).map_err(|e| BumpError::ToolFailed {
+    std::fs::write(path, format!("{version}\n")).map_err(|e| BumpError::ToolIo {
         tool: path.to_string(),
-        message: format!("failed to write: {e}"),
+        source: e,
     })?;
     debug!(%version, %path, "updated text version file");
     Ok(true)
@@ -410,9 +411,9 @@ fn resolve_paths(root: &Utf8Path, path_pattern: &str) -> BumpResult<(Vec<Utf8Pat
     if is_glob_pattern {
         let full_pattern = root.join(path_pattern).to_string();
         let matches: Vec<Utf8PathBuf> = glob::glob(&full_pattern)
-            .map_err(|e| BumpError::ToolFailed {
+            .map_err(|e| BumpError::ToolParse {
                 tool: path_pattern.to_string(),
-                message: format!("invalid glob pattern: {e}"),
+                source: Box::new(e),
             })?
             .filter_map(|entry| entry.ok())
             .filter_map(|p| Utf8PathBuf::try_from(p).ok())

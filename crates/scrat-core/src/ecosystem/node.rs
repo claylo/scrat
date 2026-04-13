@@ -32,16 +32,15 @@ impl EcosystemDriver for NodeDriver {
         _detection: &ProjectDetection,
     ) -> BumpResult<Vec<String>> {
         let package_path = project_root.join("package.json");
-        let content =
-            std::fs::read_to_string(&package_path).map_err(|e| BumpError::ToolFailed {
-                tool: "package.json".into(),
-                message: format!("failed to read: {e}"),
-            })?;
+        let content = std::fs::read_to_string(&package_path).map_err(|e| BumpError::ToolIo {
+            tool: "package.json".into(),
+            source: e,
+        })?;
 
         let mut parsed: serde_json::Value =
-            serde_json::from_str(&content).map_err(|e| BumpError::ToolFailed {
+            serde_json::from_str(&content).map_err(|e| BumpError::ToolParse {
                 tool: "package.json".into(),
-                message: format!("failed to parse: {e}"),
+                source: Box::new(e),
             })?;
 
         if parsed.get("version").and_then(|v| v.as_str()).is_none() {
@@ -54,16 +53,15 @@ impl EcosystemDriver for NodeDriver {
         parsed["version"] = serde_json::Value::String(version.to_string());
 
         // npm convention: 2-space indent, trailing newline
-        let output = serde_json::to_string_pretty(&parsed).map_err(|e| BumpError::ToolFailed {
-            tool: "package.json".into(),
-            message: format!("failed to serialize: {e}"),
-        })?;
-
-        std::fs::write(&package_path, format!("{output}\n")).map_err(|e| {
-            BumpError::ToolFailed {
+        let output =
+            serde_json::to_string_pretty(&parsed).map_err(|e| BumpError::ToolSerialize {
                 tool: "package.json".into(),
-                message: format!("failed to write: {e}"),
-            }
+                source: Box::new(e),
+            })?;
+
+        std::fs::write(&package_path, format!("{output}\n")).map_err(|e| BumpError::ToolIo {
+            tool: "package.json".into(),
+            source: e,
         })?;
 
         debug!(%version, "bumped package.json version");

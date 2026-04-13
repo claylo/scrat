@@ -392,3 +392,143 @@ Bundle D #2 — ~20 call sites across `bump.rs` and `version_files.rs`,
 different blast radius.
 
 ---
+
+## 2026-04-13 — BumpError source-chain restoration (Bundle D #2)
+
+**Disposition:** fixed
+**Addresses:**
+[notes-error-flattens-source-chain](README.md#notes-error-flattens-source-chain) (moderate, BumpError half)
+**Commit:** _(see PR linked from front matter once merged)_
+**Author:** @claylo
+
+Closes the BumpError half of `notes-error-flattens-source-chain`. The
+ledger row was already flipped to ✅ in Bundle D #1 (the audit treats
+NotesError + BumpError as one slug); this PR closes the second
+remediation phase the finding called out.
+
+`BumpError::ToolFailed { tool, message: format!("...: {e}") }` was the
+same anti-pattern as `NotesError::CliffContext(String)`, but with a
+larger and more diverse footprint — Phase 4's ecosystem-driver split
+expanded the surface from the audit's "~20" estimate to ~46 src sites,
+wrapping six distinct error types across seven files.
+
+### Three new variants — different shape than NotesError on purpose
+
+NotesError used four `#[from]` variants for its four sub-error types.
+BumpError can't follow the same pattern: it wraps `serde_json::Error`,
+`serde_saphyr::Error`, `toml_edit::TomlError`, and `glob::PatternError`
+— mostly parsers — which would mean four near-identical variants.
+
+The audit suggested a three-variant model (`ToolIo` / `ToolParse` /
+`ToolSerialize`) and that's the right shape here. Parsers collapse into
+one variant via a boxed source:
+
+- `ToolIo { tool, #[source] source: std::io::Error }` — 21 sites.
+  Subprocess and file I/O (`Command::output`, `read_to_string`, `write`,
+  `read_dir`).
+- `ToolParse { tool, #[source] source: Box<dyn Error + Send + Sync> }` —
+  9 sites. JSON, YAML, TOML, glob pattern parse failures.
+- `ToolSerialize { tool, #[source] source: Box<dyn Error + Send + Sync> }`
+  — 5 sites. JSON / YAML serialize failures (write-back after edit).
+
+Trade-off: explicit `.map_err()` constructions instead of `?` — but the
+`tool` field is preserved (it carries the manifest path, which is
+load-bearing context for diagnostics), and `source: Box::new(e)` keeps
+the chain. The `#[source]` attribute hooks the boxed value into
+`Error::source()` — same machinery the chain renderer in `main.rs:15`
+walks.
+
+### `ToolFailed { tool, message }` retained for genuine cases
+
+Twelve sites stay as `ToolFailed`:
+
+- **Tool-stderr (2):** `bump.rs::generate_changelog` (git-cliff
+  non-zero) and `ecosystem/rust.rs::bump_version_files` (cargo
+  set-version non-zero). The stderr text *is* the diagnostic — there
+  is no Rust-level wrapped error to preserve.
+- **Synthesized pre-condition errors (8):** `version_files.rs` (text
+  format with `field`/`fields`, non-text without, file not found, field
+  not found in explicit path), `bump.rs` (Ruby has no version.rb +
+  no version_files config), `ecosystem/node.rs` (package.json missing
+  `version` key), `ecosystem/ruby.rs` (non-UTF-8 paths from
+  `Utf8PathBuf::from_path_buf`, which returns the original `PathBuf`
+  rather than an `Error` type).
+- **Tests (2):** display-string assertions on the `ToolFailed` variant
+  itself.
+
+### Sites refactored
+
+| File | io::Error | parse | serialize |
+|------|-----------|-------|-----------|
+| `version_files.rs` | 10 | 4 (json, yaml×2, toml, toml-fm, json glob…) | 3 (json, yaml, yaml-fm) |
+| `bump.rs` | 1 (git-cliff `Command::output`) | — | — |
+| `ecosystem/node.rs` | 2 | 1 | 1 |
+| `ecosystem/php.rs` | 1 | 1 | 1 |
+| `ecosystem/python.rs` | 1 | — | — |
+| `ecosystem/ruby.rs` | 5 (read_dir + 4 read/write helpers) | 2 (glob pattern + entry) | — |
+| `ecosystem/rust.rs` | 1 (cargo `Command::output`) | — | — |
+
+Plus 4 unchanged tool-stderr / synthesized sites in those files. The
+audit's "~30 call sites" was a Phase-3 snapshot; the actual count today
+is 46 changed, 12 retained. The pattern is uniform — mechanical per
+site, but enough volume that the diff is large.
+
+### Tests
+
+Three new source-chain tests in `bump.rs::tests`:
+
+- `tool_io_preserves_io_source` — constructs `ToolIo` from
+  `io::Error::new(PermissionDenied, ...)`; asserts top-level Display
+  contains the tool name and `source().to_string()` exposes the
+  underlying message.
+- `tool_parse_preserves_boxed_source` — boxes a `serde_json::Error`
+  into `ToolParse`; asserts `source().is_some()`.
+- `tool_serialize_preserves_boxed_source` — same shape for
+  `ToolSerialize`.
+
+The two existing pattern-match tests
+(`execute_node_errors_without_version_field`,
+`bump_error_tool_failed_display`) still pass — they exercise the
+synthesized-error paths that intentionally stay on `ToolFailed`.
+
+### End-to-end smoke
+
+```
+$ scrat bump --version 0.1.0 --no-changelog
+# (in tempdir with broken.json in [[version_files]])
+
+# before:
+Error: bump failed: broken.json failed: failed to parse JSON: key must be a string at line 1 column 3
+
+# after:
+Error: bump failed
+Caused by:
+    /private/var/.../broken.json: parse error
+Caused by:
+    key must be a string at line 1 column 3
+```
+
+The `tool` field carries the absolute path (since the smoke runs in a
+tempdir); the variant label says "parse error"; the source is the
+`serde_json::Error` with line/column info. Three layers, each
+informative.
+
+### Verification
+
+- `just test`: 600/600 passed (3 new source-chain tests)
+- `just clippy`: 0 warnings
+- `cargo fmt --all --check`: clean
+- End-to-end smoke against tempdir bump scenarios:
+  - malformed JSON in `[[version_files]]` → `ToolParse` chain
+    (serde_json source)
+  - missing file in `[[version_files]]` → `ToolFailed` (synthesized
+    error, no chain — correct, no underlying Rust error exists)
+
+### Ledger note
+
+`notes-error-flattens-source-chain` row in the Remediation Ledger was
+flipped to ✅ in Bundle D #1; no additional ledger flip needed for
+this PR. The disposition history is now: D #1 closes NotesError, D #2
+closes BumpError, slug fully resolved.
+
+---

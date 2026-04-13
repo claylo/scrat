@@ -41,9 +41,9 @@ impl EcosystemDriver for RustDriver {
             .arg(version.to_string())
             .current_dir(project_root.as_std_path())
             .output()
-            .map_err(|e| BumpError::ToolFailed {
+            .map_err(|e| BumpError::ToolIo {
                 tool: bump_cmd.clone(),
-                message: format!("failed to execute: {e}"),
+                source: e,
             })?;
 
         if !output.status.success() {

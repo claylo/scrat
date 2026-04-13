@@ -57,14 +57,14 @@ impl EcosystemDriver for RubyDriver {
         let lib_dir = project_root.join("lib");
         if lib_dir.is_dir() {
             let pattern = format!("{lib_dir}/**/version.rb");
-            let paths = glob::glob(&pattern).map_err(|e| BumpError::ToolFailed {
-                tool: "ruby".into(),
-                message: format!("glob pattern error: {e}"),
+            let paths = glob::glob(&pattern).map_err(|e| BumpError::ToolParse {
+                tool: pattern.clone(),
+                source: Box::new(e),
             })?;
             for entry in paths {
-                let path = entry.map_err(|e| BumpError::ToolFailed {
-                    tool: "ruby".into(),
-                    message: format!("glob entry error: {e}"),
+                let path = entry.map_err(|e| BumpError::ToolParse {
+                    tool: pattern.clone(),
+                    source: Box::new(e),
                 })?;
                 let path = Utf8PathBuf::from_path_buf(path).map_err(|p| BumpError::ToolFailed {
                     tool: "ruby".into(),
@@ -83,14 +83,14 @@ impl EcosystemDriver for RubyDriver {
         // 2. *.gemspec — only update literal `<x>.version = "..."` assignments;
         //    skip `spec.version = MyGem::VERSION` constant references.
         let read_dir =
-            std::fs::read_dir(project_root.as_std_path()).map_err(|e| BumpError::ToolFailed {
-                tool: "ruby".into(),
-                message: format!("failed to read project root: {e}"),
+            std::fs::read_dir(project_root.as_std_path()).map_err(|e| BumpError::ToolIo {
+                tool: project_root.to_string(),
+                source: e,
             })?;
         for entry in read_dir {
-            let entry = entry.map_err(|e| BumpError::ToolFailed {
-                tool: "ruby".into(),
-                message: format!("read_dir entry error: {e}"),
+            let entry = entry.map_err(|e| BumpError::ToolIo {
+                tool: project_root.to_string(),
+                source: e,
             })?;
             let path = entry.path();
             if path.extension().and_then(|s| s.to_str()) != Some("gemspec") {
@@ -246,11 +246,10 @@ impl EcosystemDriver for RubyDriver {
 /// Rewrite a Ruby `VERSION = "..."` assignment in-place.
 /// Returns `true` if the file was modified.
 fn update_ruby_version_file(path: &Utf8Path, new_version: &str) -> BumpResult<bool> {
-    let content =
-        std::fs::read_to_string(path.as_std_path()).map_err(|e| BumpError::ToolFailed {
-            tool: "ruby".into(),
-            message: format!("failed to read {path}: {e}"),
-        })?;
+    let content = std::fs::read_to_string(path.as_std_path()).map_err(|e| BumpError::ToolIo {
+        tool: path.to_string(),
+        source: e,
+    })?;
 
     let mut changed = false;
     let mut out_lines: Vec<String> = Vec::with_capacity(content.lines().count());
@@ -273,9 +272,9 @@ fn update_ruby_version_file(path: &Utf8Path, new_version: &str) -> BumpResult<bo
     if content.ends_with('\n') {
         out.push('\n');
     }
-    std::fs::write(path.as_std_path(), out).map_err(|e| BumpError::ToolFailed {
-        tool: "ruby".into(),
-        message: format!("failed to write {path}: {e}"),
+    std::fs::write(path.as_std_path(), out).map_err(|e| BumpError::ToolIo {
+        tool: path.to_string(),
+        source: e,
     })?;
     Ok(true)
 }
@@ -286,11 +285,10 @@ fn update_ruby_version_file(path: &Utf8Path, new_version: &str) -> BumpResult<bo
 /// like `spec.version = MyGem::VERSION` alone so the version.rb update
 /// remains the source of truth.
 fn update_gemspec_version_file(path: &Utf8Path, new_version: &str) -> BumpResult<bool> {
-    let content =
-        std::fs::read_to_string(path.as_std_path()).map_err(|e| BumpError::ToolFailed {
-            tool: "ruby".into(),
-            message: format!("failed to read {path}: {e}"),
-        })?;
+    let content = std::fs::read_to_string(path.as_std_path()).map_err(|e| BumpError::ToolIo {
+        tool: path.to_string(),
+        source: e,
+    })?;
 
     let mut changed = false;
     let mut out_lines: Vec<String> = Vec::with_capacity(content.lines().count());
@@ -313,9 +311,9 @@ fn update_gemspec_version_file(path: &Utf8Path, new_version: &str) -> BumpResult
     if content.ends_with('\n') {
         out.push('\n');
     }
-    std::fs::write(path.as_std_path(), out).map_err(|e| BumpError::ToolFailed {
-        tool: "ruby".into(),
-        message: format!("failed to write {path}: {e}"),
+    std::fs::write(path.as_std_path(), out).map_err(|e| BumpError::ToolIo {
+        tool: path.to_string(),
+        source: e,
     })?;
     Ok(true)
 }
