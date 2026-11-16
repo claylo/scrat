@@ -1,3 +1,13 @@
+## [0.1.4] - 2026-11-16
+
+### 🐛 Bug Fixes
+
+- *(ship)* Handle first releases and show why a hook failed
+
+### ⚙️ Miscellaneous Tasks
+
+- *(cd)* Reorder publish-homebrew so checkout doesn't wipe checksums (#52)
+- Pass cargo-deny --config through the action's global arguments
 ## [0.1.3] - 2026-04-13
 
 ### 🐛 Bug Fixes
@@ -7,13 +17,6 @@
 - *(notes)* Honor --from flag and run filter hooks in preview (#44)
 - *(notes)* Preserve source chain through NotesError variants (#48)
 - *(bump)* Preserve source chain through BumpError variants (#49)
-
-### 🚜 Refactor
-
-- *(detect)* Extract remaining per-ecosystem helpers to sibling files (#37)
-- *(bump)* Extract per-ecosystem version bump helpers into bump/ (#38)
-- *(deps)* Extract per-ecosystem lockfile diff parsers into deps/ (#40)
-- *(ecosystem)* Unify bump, deps, detect into ecosystem/ with EcosystemDriver trait (#43)
 
 ### 📚 Documentation
 
@@ -26,6 +29,13 @@
 
 - *(pipeline)* Cache has_binary and thread branch through plan (#47)
 
+### 🚜 Refactor
+
+- *(detect)* Extract remaining per-ecosystem helpers to sibling files (#37)
+- *(bump)* Extract per-ecosystem version bump helpers into bump/ (#38)
+- *(deps)* Extract per-ecosystem lockfile diff parsers into deps/ (#40)
+- *(ecosystem)* Unify bump, deps, detect into ecosystem/ with EcosystemDriver trait (#43)
+
 ### ⚙️ Miscellaneous Tasks
 
 - Fix deployment for fault tolerance
@@ -33,6 +43,7 @@
 - *(audit)* Harden supply chain (Bundle B) (#46)
 - *(audit)* Expect() messages carry the literal indicatif template (#50)
 - *(audit)* Feature-gate clap in scrat-core behind cli feature (#51)
+- Release 0.1.3
 ## [0.1.2] - 2026-04-05
 
 ### 🐛 Bug Fixes
