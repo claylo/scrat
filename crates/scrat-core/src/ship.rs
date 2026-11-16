@@ -451,7 +451,7 @@ impl ReadyShip {
             version: version.to_string(),
             previous_version: previous.to_string(),
             tag: tag.clone(),
-            previous_tag: format!("v{previous}"),
+            previous_tag: previous_tag_for(previous),
             owner,
             repo,
             repo_url,
@@ -467,12 +467,13 @@ impl ReadyShip {
         }
 
         // Deps diff (silent data-gathering, populates context)
-        if !self.options.no_deps {
+        if !self.options.no_deps && !ctx.previous_tag.is_empty() {
             ctx.dependencies = deps::compute_deps(self.detection.ecosystem, &ctx.previous_tag);
         }
 
-        // Stats collection (silent data-gathering, populates context)
-        if !self.options.no_stats {
+        // Stats collection (silent data-gathering, populates context).
+        // Skipped on a first release: there is no tag to measure from.
+        if !self.options.no_stats && !ctx.previous_tag.is_empty() {
             ctx.stats = stats::compute_stats(&ctx.previous_tag);
         }
 
@@ -1113,6 +1114,30 @@ struct ReleasePhaseResult {
     url: Option<String>,
     /// Whether an existing release was edited (vs newly created).
     edited: bool,
+}
+
+/// The git tag for the previous version, or an empty string when that tag
+/// does not exist.
+///
+/// On a first release the previous version is the 0.0.0 placeholder and no
+/// `v0.0.0` tag exists. Passing that name on as a ref made git-cliff fail on
+/// the range `v0.0.0..HEAD`, so release notes silently fell back to
+/// `--generate-notes`, and it broke any hook that ran git against it. An
+/// empty `previous_tag` is the pipeline's "no prior release" signal; notes
+/// rendering already treats it as "everything so far is unreleased".
+fn previous_tag_for(previous: &Version) -> String {
+    let candidate = format!("v{previous}");
+    previous_tag_if_exists(candidate, |tag| git::tag_exists(tag).unwrap_or(false))
+}
+
+/// Pure half of [`previous_tag_for`]: keep `candidate` only if `exists` says
+/// the tag is real.
+fn previous_tag_if_exists(candidate: String, exists: impl Fn(&str) -> bool) -> String {
+    if exists(&candidate) {
+        candidate
+    } else {
+        String::new()
+    }
 }
 
 /// Write rendered notes to a temporary file that lives until the `NamedTempFile` is dropped.
@@ -3370,6 +3395,19 @@ mod tests {
         let version = Version::parse("1.0.0-alpha.1").unwrap();
         let tag = format!("v{version}");
         assert_eq!(tag, "v1.0.0-alpha.1");
+    }
+
+    #[test]
+    fn previous_tag_is_kept_when_the_tag_exists() {
+        let tag = previous_tag_if_exists("v0.9.0".into(), |t| t == "v0.9.0");
+        assert_eq!(tag, "v0.9.0");
+    }
+
+    #[test]
+    fn previous_tag_is_empty_on_a_first_release() {
+        // No v0.0.0 tag exists; the placeholder must not leak out as a ref.
+        let tag = previous_tag_if_exists("v0.0.0".into(), |_| false);
+        assert_eq!(tag, "");
     }
 
     #[test]

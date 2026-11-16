@@ -42,7 +42,7 @@ use tracing::{debug, instrument, warn};
 #[derive(Error, Debug)]
 pub enum HookError {
     /// A hook command exited with a non-zero status.
-    #[error("hook command failed: {command}")]
+    #[error("hook command failed{}: {command}{}", exit_suffix(*exit_code), stderr_tail(stderr))]
     CommandFailed {
         /// The command that failed.
         command: String,
@@ -53,7 +53,7 @@ pub enum HookError {
     },
 
     /// A filter hook returned invalid JSON.
-    #[error("filter hook returned invalid output: {command}")]
+    #[error("filter hook returned invalid output: {command}\n  {detail}")]
     FilterOutputInvalid {
         /// The command that produced invalid output.
         command: String,
@@ -64,6 +64,32 @@ pub enum HookError {
     /// Failed to spawn a hook command.
     #[error("failed to execute hook: {0}")]
     Exec(#[from] std::io::Error),
+}
+
+/// How many trailing stderr lines a failed hook shows in its error message.
+const STDERR_TAIL_LINES: usize = 20;
+
+/// Render the exit code for an error message: `" (exit 128)"`, or nothing
+/// when the process was killed by a signal.
+fn exit_suffix(exit_code: Option<i32>) -> String {
+    exit_code.map_or_else(String::new, |code| format!(" (exit {code})"))
+}
+
+/// Render the last lines of a hook's stderr, indented under the error
+/// message. Without this the cause of a failed hook is invisible: the
+/// command is named, but what it printed before dying is dropped.
+fn stderr_tail(stderr: &str) -> String {
+    let lines: Vec<&str> = stderr.lines().collect();
+    if lines.is_empty() {
+        return String::new();
+    }
+    let start = lines.len().saturating_sub(STDERR_TAIL_LINES);
+    let mut out = String::new();
+    for line in &lines[start..] {
+        out.push_str("\n  ");
+        out.push_str(line);
+    }
+    out
 }
 
 /// Result alias for hook operations.
@@ -472,6 +498,47 @@ mod tests {
         let ctx = test_context();
         let result = interpolate("echo {unknown} {version}", &ctx);
         assert_eq!(result, "echo {unknown} 1.2.3");
+    }
+
+    #[test]
+    fn command_failed_shows_exit_code_and_stderr() {
+        let err = HookError::CommandFailed {
+            command: "release-context --corpus quotes.jsonl".into(),
+            exit_code: Some(128),
+            stderr: "info: reading corpus\nfatal: ambiguous argument 'v0.0.0..HEAD'".into(),
+        };
+        assert_eq!(
+            err.to_string(),
+            "hook command failed (exit 128): release-context --corpus quotes.jsonl\n  \
+             info: reading corpus\n  fatal: ambiguous argument 'v0.0.0..HEAD'"
+        );
+    }
+
+    #[test]
+    fn command_failed_without_stderr_or_exit_code_stays_one_line() {
+        let err = HookError::CommandFailed {
+            command: "false".into(),
+            exit_code: None,
+            stderr: String::new(),
+        };
+        assert_eq!(err.to_string(), "hook command failed: false");
+    }
+
+    #[test]
+    fn command_failed_keeps_only_the_stderr_tail() {
+        let stderr: String = (1..=50).map(|n| format!("line {n}\n")).collect();
+        let err = HookError::CommandFailed {
+            command: "noisy".into(),
+            exit_code: Some(1),
+            stderr,
+        };
+        let shown = err.to_string();
+        assert!(
+            !shown.contains("line 30\n"),
+            "lines before the tail are dropped"
+        );
+        assert!(shown.contains("\n  line 31\n"));
+        assert!(shown.ends_with("\n  line 50"));
     }
 
     #[test]

@@ -103,7 +103,7 @@ fix:
 
 # Check dependencies for security advisories and license compliance
 deny:
-  cargo deny check --config .config/deny.toml
+  cargo deny --config .config/deny.toml check
 
 test:
   cargo nextest run
